@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 import {
   ChevronLeft, Bell, FileText, Receipt, AlertCircle, Clock, Send,
-  Phone, Mail, MessageSquare, History, X, CheckCircle2, Filter
+  X, CheckCircle2, Filter
 } from 'lucide-react';
 import { Query, ID } from 'appwrite';
 
@@ -56,8 +56,8 @@ interface ReminderItem {
   number: string;
   clientName: string;
   amount: number;
-  days: number; // Jours de retard ou depuis l'envoi
-  level: number; // 1, 2 ou 3
+  days: number;
+  level: number;
   urgency: 'info' | 'warning' | 'danger' | 'critical';
   label: string;
   email?: string;
@@ -85,87 +85,16 @@ const methodLabels: Record<string, string> = {
   mail: '✉️ Courrier'
 };
 
-// ✅ Modèles de messages prêts à l'emploi
 const quoteTemplates: Record<number, string> = {
-  1: `Bonjour {clientName},
-
-Je me permets de revenir vers vous concernant le devis n°{number} que je vous ai transmis le {date} pour un montant de {amount}.
-
-Avez-vous pu en prendre connaissance ? Je reste à votre entière disposition pour répondre à vos questions ou ajuster l'offre selon vos besoins.
-
-Vous pouvez consulter et accepter le devis en ligne via ce lien :
-{link}
-
-Cordialement,
-{companyName}`,
-  2: `Bonjour {clientName},
-
-Je fais suite à mon précédent message concernant le devis n°{number} d'un montant de {amount}, transmis le {date}.
-
-Je n'ai pas reçu de retour de votre part et je souhaitais m'assurer que vous aviez bien reçu notre proposition. N'hésitez pas à me contacter si vous avez des questions ou si vous souhaitez des précisions.
-
-Vous pouvez consulter et accepter le devis en ligne via ce lien :
-{link}
-
-Dans l'attente de votre retour, je vous prie d'agréer, {clientName}, mes salutations distinguées.
-
-{companyName}`,
-  3: `Bonjour {clientName},
-
-Je me permets de vous recontacter une dernière fois concernant le devis n°{number} d'un montant de {amount}.
-
-Notre offre arrive à expiration prochainement. Si vous souhaitez bénéficier de ces conditions, je vous invite à nous donner votre accord rapidement.
-
-Sans retour de votre part sous 7 jours, nous considérerons cette offre comme caduque.
-
-Vous pouvez consulter et accepter le devis en ligne via ce lien :
-{link}
-
-Cordialement,
-{companyName}`
+  1: `Bonjour {clientName},\n\nJe me permets de revenir vers vous concernant le devis n°{number} que je vous ai transmis le {date} pour un montant de {amount}.\n\nAvez-vous pu en prendre connaissance ? Je reste à votre entière disposition pour répondre à vos questions ou ajuster l'offre selon vos besoins.\n\nVous pouvez consulter et accepter le devis en ligne via ce lien :\n{link}\n\nCordialement,\n{companyName}`,
+  2: `Bonjour {clientName},\n\nJe fais suite à mon précédent message concernant le devis n°{number} d'un montant de {amount}, transmis le {date}.\n\nJe n'ai pas reçu de retour de votre part et je souhaitais m'assurer que vous aviez bien reçu notre proposition.\n\nVous pouvez consulter et accepter le devis en ligne via ce lien :\n{link}\n\nCordialement,\n{companyName}`,
+  3: `Bonjour {clientName},\n\nJe me permets de vous recontacter une dernière fois concernant le devis n°{number} d'un montant de {amount}.\n\nNotre offre arrive à expiration prochainement. Sans retour de votre part sous 7 jours, nous considérerons cette offre comme caduque.\n\nVous pouvez consulter et accepter le devis en ligne via ce lien :\n{link}\n\nCordialement,\n{companyName}`
 };
 
 const invoiceTemplates: Record<number, string> = {
-  1: `Bonjour {clientName},
-
-Sauf erreur ou omission de notre part, la facture n°{number} d'un montant de {amount}, arrivée à échéance le {date}, n'a pas encore été réglée.
-
-Nous vous remercions de bien vouloir procéder au règlement dans les meilleurs délais.
-
-Si votre règlement a été effectué entre-temps, merci de ne pas tenir compte de ce rappel.
-
-Vous pouvez consulter et régler la facture en ligne via ce lien :
-{link}
-
-Cordialement,
-{companyName}`,
-  2: `Bonjour {clientName},
-
-Malgré notre précédente relance du {lastReminderDate}, nous constatons que la facture n°{number} d'un montant de {amount}, échue le {date}, n'a toujours pas été réglée.
-
-Nous vous prions de bien vouloir procéder au règlement sous 8 jours.
-
-À défaut de règlement dans ce délai, nous nous verrons dans l'obligation d'appliquer les pénalités de retard prévues par la loi (3x le taux d'intérêt légal + indemnité forfaitaire de 40€).
-
-Vous pouvez consulter et régler la facture en ligne via ce lien :
-{link}
-
-Cordialement,
-{companyName}`,
-  3: `MISE EN DEMEURE DE PAYER
-
-{clientName},
-
-Malgré nos multiples relances, la facture n°{number} d'un montant de {amount}, échue le {date}, demeure impayée à ce jour.
-
-Par la présente, nous vous mettons en demeure de procéder au règlement intégral de cette somme sous 8 jours à compter de la réception de ce courrier.
-
-À défaut de règlement dans ce délai, nous engagerons toutes les procédures de recouvrement nécessaires, y compris judiciaires, avec application des pénalités de retard et de l'indemnité forfaitaire de recouvrement.
-
-Vous pouvez consulter et régler la facture en ligne via ce lien :
-{link}
-
-{companyName}`
+  1: `Bonjour {clientName},\n\nSauf erreur ou omission de notre part, la facture n°{number} d'un montant de {amount}, arrivée à échéance le {date}, n'a pas encore été réglée.\n\nNous vous remercions de bien vouloir procéder au règlement dans les meilleurs délais.\n\nVous pouvez consulter et régler la facture en ligne via ce lien :\n{link}\n\nCordialement,\n{companyName}`,
+  2: `Bonjour {clientName},\n\nMalgré notre précédente relance, nous constatons que la facture n°{number} d'un montant de {amount}, échue le {date}, n'a toujours pas été réglée.\n\nNous vous prions de bien vouloir procéder au règlement sous 8 jours.\n\nVous pouvez consulter et régler la facture en ligne via ce lien :\n{link}\n\nCordialement,\n{companyName}`,
+  3: `MISE EN DEMEURE DE PAYER\n\n{clientName},\n\nMalgré nos multiples relances, la facture n°{number} d'un montant de {amount}, échue le {date}, demeure impayée à ce jour.\n\nPar la présente, nous vous mettons en demeure de procéder au règlement intégral de cette somme sous 8 jours.\n\nVous pouvez consulter et régler la facture en ligne via ce lien :\n{link}\n\n{companyName}`
 };
 
 export default function Reminders() {
@@ -181,13 +110,9 @@ export default function Reminders() {
   const [filterUrgency, setFilterUrgency] = useState<'all' | 'info' | 'warning' | 'danger' | 'critical'>('all');
   const [activeTab, setActiveTab] = useState<'todo' | 'history'>('todo');
   
-  // Modal d'envoi de relance
   const [showSendModal, setShowSendModal] = useState(false);
   const [selectedReminder, setSelectedReminder] = useState<ReminderItem | null>(null);
-  const [sendForm, setSendForm] = useState({
-    method: 'email',
-    message: ''
-  });
+  const [sendForm, setSendForm] = useState({ method: 'email', message: '' });
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
@@ -202,19 +127,21 @@ export default function Reminders() {
   }, [user]);
 
   const loadReminders = async () => {
+    // ✅ CORRECTION TS18047 : Guard clause pour s'assurer que user n'est pas null
+    if (!user) return; 
+
     try {
       setLoading(true);
       let teamId = null;
-      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user.$id)]);
+      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user?.$id)]);
       if (teamsRes.documents.length > 0) teamId = teamsRes.documents[0].$id;
       else {
-        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
+        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user?.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
       if (!teamId) { setLoading(false); return; }
       setCurrentTeamId(teamId);
 
-      // Charger les devis, factures et historique des relances
       const [quotesRes, invoicesRes, historyRes] = await Promise.all([
         databases.listDocuments(DATABASE_ID, 'quotes', [Query.equal('teamId', teamId), Query.limit(2000)]),
         databases.listDocuments(DATABASE_ID, 'invoices', [Query.equal('teamId', teamId), Query.limit(2000)]),
@@ -223,108 +150,49 @@ export default function Reminders() {
 
       setHistory(historyRes.documents as unknown as Reminder[]);
 
-      // ✅ Détection automatique des éléments à relancer
       const items: ReminderItem[] = [];
       const today = new Date();
 
-      // Devis à relancer
       (quotesRes.documents as unknown as Quote[]).forEach(quote => {
         if (quote.status !== 'Envoyé') return;
-        
         const issueDate = new Date(quote.issueDate || '');
         const daysSinceSent = Math.floor((today.getTime() - issueDate.getTime()) / (1000 * 60 * 60 * 24));
-        
         const validityDate = quote.validityDate ? new Date(quote.validityDate) : null;
         const daysUntilExpiry = validityDate ? Math.floor((validityDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24)) : null;
 
-        // Devis expiré
         if (daysUntilExpiry !== null && daysUntilExpiry < 0) {
-          items.push({
-            id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName,
-            amount: quote.total, days: Math.abs(daysUntilExpiry), level: 3, urgency: 'critical',
-            label: 'Devis expiré', email: quote.clientEmail, token: quote.clientToken
-          });
-        }
-        // Devis qui expire bientôt
-        else if (daysUntilExpiry !== null && daysUntilExpiry <= 3) {
-          items.push({
-            id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName,
-            amount: quote.total, days: daysUntilExpiry, level: 2, urgency: 'danger',
-            label: `Expire dans ${daysUntilExpiry} jour(s)`, email: quote.clientEmail, token: quote.clientToken
-          });
-        }
-        // Devis sans réponse depuis longtemps
-        else if (daysSinceSent >= 15) {
-          items.push({
-            id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName,
-            amount: quote.total, days: daysSinceSent, level: 3, urgency: 'critical',
-            label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken
-          });
-        }
-        else if (daysSinceSent >= 7) {
-          items.push({
-            id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName,
-            amount: quote.total, days: daysSinceSent, level: 2, urgency: 'danger',
-            label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken
-          });
-        }
-        else if (daysSinceSent >= 3) {
-          items.push({
-            id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName,
-            amount: quote.total, days: daysSinceSent, level: 1, urgency: 'warning',
-            label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken
-          });
+          items.push({ id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName, amount: quote.total, days: Math.abs(daysUntilExpiry), level: 3, urgency: 'critical', label: 'Devis expiré', email: quote.clientEmail, token: quote.clientToken });
+        } else if (daysUntilExpiry !== null && daysUntilExpiry <= 3) {
+          items.push({ id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName, amount: quote.total, days: daysUntilExpiry, level: 2, urgency: 'danger', label: `Expire dans ${daysUntilExpiry} jour(s)`, email: quote.clientEmail, token: quote.clientToken });
+        } else if (daysSinceSent >= 15) {
+          items.push({ id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName, amount: quote.total, days: daysSinceSent, level: 3, urgency: 'critical', label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken });
+        } else if (daysSinceSent >= 7) {
+          items.push({ id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName, amount: quote.total, days: daysSinceSent, level: 2, urgency: 'danger', label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken });
+        } else if (daysSinceSent >= 3) {
+          items.push({ id: quote.$id, type: 'quote', number: quote.quoteNumber, clientName: quote.clientName, amount: quote.total, days: daysSinceSent, level: 1, urgency: 'warning', label: `Sans réponse depuis ${daysSinceSent} jours`, email: quote.clientEmail, token: quote.clientToken });
         }
       });
 
-      // Factures à relancer
       (invoicesRes.documents as unknown as Invoice[]).forEach(invoice => {
         if (invoice.status === 'paid' || invoice.status === 'cancelled') return;
-        
         const dueDate = invoice.dueDate ? new Date(invoice.dueDate) : null;
         if (!dueDate) return;
-
         const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
         const daysUntilDue = Math.floor((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
-        // Facture très en retard
         if (daysOverdue >= 30) {
-          items.push({
-            id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName,
-            amount: invoice.balance || invoice.total, days: daysOverdue, level: 3, urgency: 'critical',
-            label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken
-          });
-        }
-        // Facture en retard
-        else if (daysOverdue >= 15) {
-          items.push({
-            id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName,
-            amount: invoice.balance || invoice.total, days: daysOverdue, level: 2, urgency: 'danger',
-            label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken
-          });
-        }
-        // Facture légèrement en retard
-        else if (daysOverdue > 0) {
-          items.push({
-            id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName,
-            amount: invoice.balance || invoice.total, days: daysOverdue, level: 1, urgency: 'warning',
-            label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken
-          });
-        }
-        // Facture qui arrive à échéance bientôt
-        else if (daysUntilDue <= 3 && daysUntilDue >= 0) {
-          items.push({
-            id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName,
-            amount: invoice.balance || invoice.total, days: -daysUntilDue, level: 1, urgency: 'info',
-            label: `Échéance dans ${daysUntilDue} jour(s)`, email: invoice.clientEmail, token: invoice.clientToken
-          });
+          items.push({ id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName, amount: invoice.balance || invoice.total, days: daysOverdue, level: 3, urgency: 'critical', label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken });
+        } else if (daysOverdue >= 15) {
+          items.push({ id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName, amount: invoice.balance || invoice.total, days: daysOverdue, level: 2, urgency: 'danger', label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken });
+        } else if (daysOverdue > 0) {
+          items.push({ id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName, amount: invoice.balance || invoice.total, days: daysOverdue, level: 1, urgency: 'warning', label: `En retard de ${daysOverdue} jours`, email: invoice.clientEmail, token: invoice.clientToken });
+        } else if (daysUntilDue <= 3 && daysUntilDue >= 0) {
+          items.push({ id: invoice.$id, type: 'invoice', number: invoice.invoiceNumber, clientName: invoice.clientName, amount: invoice.balance || invoice.total, days: -daysUntilDue, level: 1, urgency: 'info', label: `Échéance dans ${daysUntilDue} jour(s)`, email: invoice.clientEmail, token: invoice.clientToken });
         }
       });
 
-      // Trier par urgence
       const urgencyOrder = { critical: 0, danger: 1, warning: 2, info: 3 };
       items.sort((a, b) => urgencyOrder[a.urgency] - urgencyOrder[b.urgency]);
-
       setReminders(items);
     } catch (error) {
       console.error('Erreur chargement relances:', error);
@@ -356,7 +224,7 @@ export default function Reminders() {
     try {
       await databases.createDocument(DATABASE_ID, 'reminders', ID.unique(), {
         teamId: currentTeamId,
-        userId: user.$id,
+        userId: user?.$id, // ✅ CORRECTION TS18047
         type: selectedReminder.type,
         relatedId: selectedReminder.id,
         relatedNumber: selectedReminder.number,
@@ -367,7 +235,6 @@ export default function Reminders() {
         sentAt: new Date().toISOString()
       });
 
-      // Si c'est un email, ouvrir le client mail
       if (sendForm.method === 'email' && selectedReminder.email) {
         const subject = encodeURIComponent(`Relance - ${selectedReminder.type === 'quote' ? 'Devis' : 'Facture'} n°${selectedReminder.number}`);
         const body = encodeURIComponent(sendForm.message);
@@ -413,7 +280,6 @@ export default function Reminders() {
       </header>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Onglets */}
         <div className="flex border-b border-slate-200 mb-6">
           <button onClick={() => setActiveTab('todo')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${activeTab === 'todo' ? 'border-orange-600 text-orange-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
             📋 À relancer ({reminders.length})
@@ -425,7 +291,6 @@ export default function Reminders() {
 
         {activeTab === 'todo' ? (
           <>
-            {/* KPIs */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
               <div className="bg-white rounded-lg shadow p-4 border-l-4 border-blue-500">
                 <p className="text-xs text-slate-500 uppercase font-semibold">Devis à relancer</p>
@@ -445,7 +310,6 @@ export default function Reminders() {
               </div>
             </div>
 
-            {/* Filtres */}
             <div className="flex gap-4 mb-6">
               <div className="relative">
                 <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -477,7 +341,6 @@ export default function Reminders() {
               </div>
             ) : (
               <div className="space-y-6">
-                {/* Section Devis */}
                 {quoteReminders.length > 0 && (
                   <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 bg-blue-50 border-b border-blue-200 flex justify-between items-center">
@@ -508,7 +371,6 @@ export default function Reminders() {
                   </div>
                 )}
 
-                {/* Section Factures */}
                 {invoiceReminders.length > 0 && (
                   <div className="bg-white rounded-lg shadow overflow-hidden">
                     <div className="px-6 py-4 bg-orange-50 border-b border-orange-200 flex justify-between items-center">
@@ -542,7 +404,6 @@ export default function Reminders() {
             )}
           </>
         ) : (
-          /* Historique des relances */
           <div className="bg-white rounded-lg shadow overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full">
@@ -558,9 +419,7 @@ export default function Reminders() {
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {history.length === 0 ? (
-                    <tr>
-                      <td colSpan={6} className="px-6 py-12 text-center text-slate-500">Aucune relance envoyée pour le moment.</td>
-                    </tr>
+                    <tr><td colSpan={6} className="px-6 py-12 text-center text-slate-500">Aucune relance envoyée pour le moment.</td></tr>
                   ) : (
                     history.map(h => (
                       <tr key={h.$id} className="hover:bg-slate-50 transition-colors">
@@ -584,14 +443,12 @@ export default function Reminders() {
         )}
       </div>
 
-      {/* Modal d'envoi de relance */}
       {showSendModal && selectedReminder && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
             <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0">
               <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Send className="text-orange-600" size={22} />
-                Envoyer une relance
+                <Send className="text-orange-600" size={22} /> Envoyer une relance
               </h2>
               <button onClick={() => setShowSendModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
                 <X size={20} className="text-slate-500" />
@@ -606,40 +463,25 @@ export default function Reminders() {
                   <div><span className="text-slate-500">Situation :</span> <strong>{selectedReminder.label}</strong></div>
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Moyen de contact *</label>
                 <div className="grid grid-cols-4 gap-2">
                   {Object.entries(methodLabels).map(([key, label]) => (
-                    <button
-                      key={key}
-                      type="button"
-                      onClick={() => setSendForm({ ...sendForm, method: key })}
-                      className={`p-3 border rounded-lg text-sm font-medium transition-colors ${sendForm.method === key ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}
-                    >
+                    <button key={key} type="button" onClick={() => setSendForm({ ...sendForm, method: key })} className={`p-3 border rounded-lg text-sm font-medium transition-colors ${sendForm.method === key ? 'border-orange-500 bg-orange-50 text-orange-700' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
                       {label}
                     </button>
                   ))}
                 </div>
               </div>
-
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Message *</label>
-                <textarea
-                  rows={10}
-                  value={sendForm.message}
-                  onChange={e => setSendForm({ ...sendForm, message: e.target.value })}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none"
-                />
+                <textarea rows={10} value={sendForm.message} onChange={e => setSendForm({ ...sendForm, message: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-orange-500 outline-none" />
               </div>
             </div>
             <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-slate-50 flex-shrink-0 rounded-b-xl">
-              <button onClick={() => setShowSendModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">
-                Annuler
-              </button>
+              <button onClick={() => setShowSendModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Annuler</button>
               <button onClick={handleSendReminder} disabled={sending || !sendForm.message.trim()} className="px-4 py-2.5 text-sm font-semibold text-white bg-orange-600 rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2">
-                {sending ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> : <Send size={16} />}
-                Enregistrer la relance
+                {sending ? <span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> : <Send size={16} />} Enregistrer la relance
               </button>
             </div>
           </div>

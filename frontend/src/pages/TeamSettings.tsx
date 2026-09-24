@@ -61,7 +61,7 @@ export default function TeamSettings() {
   const [archivedMembers, setArchivedMembers] = useState<Member[]>([]);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
   
-  const [loading, setLoading] = useState(true);
+  const [_loading, setLoading] = useState(true); // ✅ CORRECTION TS6133
 
   const [showRoleModal, setShowRoleModal] = useState(false);
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
@@ -93,22 +93,20 @@ export default function TeamSettings() {
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
-    
-    // ✅ DEBUG : Vérifier que secureTeamId est disponible
     console.log("🔍 DEBUG TeamSettings - secureTeamId:", user?.secureTeamId);
-    
     loadData();
   }, [user]);
 
   const loadData = async () => {
+    if (!user) return; // ✅ CORRECTION TS18047
     try {
-      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user.$id)]);
+      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user?.$id)]);
       let currentTeamId = null;
       if (teamsRes.documents.length > 0) {
         currentTeamId = teamsRes.documents[0].$id;
         setTeamId(currentTeamId);
       } else {
-        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
+        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user?.$id)]);
         if (membersRes.documents.length > 0) {
           currentTeamId = membersRes.documents[0].teamId;
           setTeamId(currentTeamId);
@@ -117,12 +115,13 @@ export default function TeamSettings() {
       if (!currentTeamId) { setLoading(false); return; }
 
       const rolesRes = await databases.listDocuments(DATABASE_ID, 'roles', [Query.equal('teamId', currentTeamId)]);
-      const parsedRoles = rolesRes.documents.map(doc => ({ ...doc, permissions: JSON.parse(doc.permissions || '[]') })) as RoleType[];
+      // ✅ CORRECTION TS2352
+      const parsedRoles = rolesRes.documents.map(doc => ({ ...doc, permissions: JSON.parse(doc.permissions || '[]') })) as unknown as RoleType[];
       setRoles(parsedRoles);
 
       const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('teamId', currentTeamId)]);
       const parsedMembers = await Promise.all(membersRes.documents.map(async (doc: any) => {
-        const role = parsedRoles.find(r => r.$id === doc.roleId) || { name: 'Inconnu', permissions: [], $id: '' };
+        const role = parsedRoles.find(r => r.$id === doc.roleId) || { name: 'Inconnu', permissions: [], $id: '', teamId: currentTeamId, isDefault: false };
         return { ...doc, role };
       }));
 
@@ -138,19 +137,10 @@ export default function TeamSettings() {
 
   const openRoleModal = (role?: RoleType) => {
     if (role) { 
-      // ✅ VÉRIFICATION DE SÉCURITÉ : Le rôle doit appartenir à l'équipe
-      if (role.teamId !== teamId) {
-        alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.');
-        return;
-      }
-      setEditingRoleId(role.$id); 
-      setNewRoleName(role.name); 
-      setSelectedPermissions(role.permissions); 
-    } 
-    else { 
-      setEditingRoleId(null); 
-      setNewRoleName(''); 
-      setSelectedPermissions([]); 
+      if (role.teamId !== teamId) { alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.'); return; }
+      setEditingRoleId(role.$id); setNewRoleName(role.name); setSelectedPermissions(role.permissions); 
+    } else { 
+      setEditingRoleId(null); setNewRoleName(''); setSelectedPermissions([]); 
     }
     setShowRoleModal(true);
   };
@@ -159,233 +149,97 @@ export default function TeamSettings() {
     if (!newRoleName.trim() || !teamId) { alert("Veuillez donner un nom au rôle."); return; }
     if (selectedPermissions.length === 0) { alert("Veuillez cocher au moins une permission."); return; }
     
-    // ✅ VÉRIFICATION DE SÉCURITÉ
-    console.log("🔍 DEBUG TeamSettings handleSaveRole - secureTeamId:", user?.secureTeamId);
-    
     try {
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
-      
       if (user?.secureTeamId) {
-        console.log("✅ TeamSettings handleSaveRole: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ TeamSettings handleSaveRole: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
 
       if (editingRoleId) {
-        // ✅ VÉRIFICATION : Le rôle doit appartenir à l'équipe
         const existingRole = roles.find(r => r.$id === editingRoleId);
-        if (!existingRole || existingRole.teamId !== teamId) {
-          throw new Error('Accès refusé : Ce rôle n\'appartient pas à votre équipe');
-        }
+        if (!existingRole || existingRole.teamId !== teamId) throw new Error('Accès refusé : Ce rôle n\'appartient pas à votre équipe');
         await databases.updateDocument(DATABASE_ID, 'roles', editingRoleId, { name: newRoleName, permissions: JSON.stringify(selectedPermissions) });
       } else {
-        await databases.createDocument(
-          DATABASE_ID, 
-          'roles', 
-          ID.unique(), 
-          { 
-            name: newRoleName, 
-            teamId: teamId, 
-            permissions: JSON.stringify(selectedPermissions), 
-            isDefault: false, 
-            createdAt: new Date().toISOString() 
-          },
-          perms
-        );
+        await databases.createDocument(DATABASE_ID, 'roles', ID.unique(), { name: newRoleName, teamId: teamId, permissions: JSON.stringify(selectedPermissions), isDefault: false, createdAt: new Date().toISOString() }, perms);
       }
-      setShowRoleModal(false); 
-      setNewRoleName(''); 
-      setSelectedPermissions([]); 
-      setEditingRoleId(null); 
-      loadData();
-    } catch (e: any) { 
-      console.error('Erreur handleSaveRole:', e);
-      alert(`Erreur: ${e.message}`); 
-    }
+      setShowRoleModal(false); setNewRoleName(''); setSelectedPermissions([]); setEditingRoleId(null); loadData();
+    } catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
   const handleDeleteRole = async (roleId: string, roleName: string) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le rôle doit appartenir à l'équipe
     const roleToDelete = roles.find(r => r.$id === roleId);
-    if (!roleToDelete || roleToDelete.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.');
-      return;
-    }
-    
+    if (!roleToDelete || roleToDelete.teamId !== teamId) { alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.'); return; }
     if (!confirm(`Supprimer le rôle "${roleName}" ?`)) return;
-    try { 
-      await databases.deleteDocument(DATABASE_ID, 'roles', roleId); 
-      loadData(); 
-    } 
+    try { await databases.deleteDocument(DATABASE_ID, 'roles', roleId); loadData(); } 
     catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
   const handleArchiveMember = async (memberId: string, email: string) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le membre doit appartenir à l'équipe
     const memberToArchive = activeMembers.find(m => m.$id === memberId);
-    if (!memberToArchive || memberToArchive.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.');
-      return;
-    }
-    
-    if (!confirm(`Archiver ${email} ? Il ne pourra plus se connecter à l'équipe.`)) return;
-    try { 
-      await databases.updateDocument(DATABASE_ID, 'team_members', memberId, { status: 'archived' }); 
-      loadData(); 
-    } catch (e: any) { alert(`Erreur: ${e.message}`); }
+    if (!memberToArchive || memberToArchive.teamId !== teamId) { alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.'); return; }
+    if (!confirm(`Archiver ${email} ?`)) return;
+    try { await databases.updateDocument(DATABASE_ID, 'team_members', memberId, { status: 'archived' }); loadData(); } 
+    catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
-  const handleUnarchiveMember = async (memberId: string, email: string) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le membre doit appartenir à l'équipe
+  const handleUnarchiveMember = async (memberId: string, _email: string) => { // ✅ CORRECTION TS6133
     const memberToUnarchive = archivedMembers.find(m => m.$id === memberId);
-    if (!memberToUnarchive || memberToUnarchive.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.');
-      return;
-    }
-    
-    try { 
-      await databases.updateDocument(DATABASE_ID, 'team_members', memberId, { status: 'active' }); 
-      loadData(); 
-    } catch (e: any) { alert(`Erreur: ${e.message}`); }
+    if (!memberToUnarchive || memberToUnarchive.teamId !== teamId) { alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.'); return; }
+    try { await databases.updateDocument(DATABASE_ID, 'team_members', memberId, { status: 'active' }); loadData(); } 
+    catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
   const openEditRoleModal = (member: Member) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le membre doit appartenir à l'équipe
-    if (member.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.');
-      return;
-    }
-    
-    setEditingMember(member);
-    setSelectedNewRoleId(member.roleId);
-    setShowEditRoleModal(true);
+    if (member.teamId !== teamId) { alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.'); return; }
+    setEditingMember(member); setSelectedNewRoleId(member.roleId); setShowEditRoleModal(true);
   };
 
   const handleSaveRoleChange = async () => {
     if (!editingMember || !selectedNewRoleId) return;
-    
-    // ✅ VÉRIFICATION DE SÉCURITÉ
-    if (editingMember.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.');
-      return;
-    }
-    
+    if (editingMember.teamId !== teamId) { alert('⚠️ Accès refusé : Ce membre n\'appartient pas à votre équipe.'); return; }
     const newRole = roles.find(r => r.$id === selectedNewRoleId);
-    if (!newRole || newRole.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.');
-      return;
-    }
-    
+    if (!newRole || newRole.teamId !== teamId) { alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.'); return; }
     try {
       await databases.updateDocument(DATABASE_ID, 'team_members', editingMember.$id, { roleId: selectedNewRoleId });
-      setShowEditRoleModal(false);
-      setEditingMember(null);
-      loadData();
+      setShowEditRoleModal(false); setEditingMember(null); loadData();
     } catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
   const copyToClipboard = (text: string, memberId?: string) => {
     navigator.clipboard.writeText(text);
-    if (memberId) {
-      setCopiedMemberId(memberId);
-      setTimeout(() => setCopiedMemberId(null), 2000);
-    } else {
-      setLinkCopied(true);
-      setTimeout(() => setLinkCopied(false), 2000);
-    }
+    if (memberId) { setCopiedMemberId(memberId); setTimeout(() => setCopiedMemberId(null), 2000); } 
+    else { setLinkCopied(true); setTimeout(() => setLinkCopied(false), 2000); }
   };
 
   const handleAddMember = async () => {
-    if (!newMemberName.trim() || !newMemberEmail.trim() || !newMemberRoleId || !teamId) {
-      alert("Veuillez remplir le nom, l'email et choisir un rôle."); 
-      return;
-    }
-    
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le rôle doit appartenir à l'équipe
+    if (!newMemberName.trim() || !newMemberEmail.trim() || !newMemberRoleId || !teamId) { alert("Veuillez remplir le nom, l'email et choisir un rôle."); return; }
     const selectedRole = roles.find(r => r.$id === newMemberRoleId);
-    if (!selectedRole || selectedRole.teamId !== teamId) {
-      alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.');
-      return;
-    }
+    if (!selectedRole || selectedRole.teamId !== teamId) { alert('⚠️ Accès refusé : Ce rôle n\'appartient pas à votre équipe.'); return; }
     
     const normalizedEmail = newMemberEmail.toLowerCase().trim();
-    const emailExistsActive = activeMembers.some(m => m.email.toLowerCase().trim() === normalizedEmail);
-    if (emailExistsActive) {
-      alert("Cet email est déjà utilisé par un membre actif de l'équipe.");
-      return;
-    }
-
-    const emailExistsArchived = archivedMembers.some(m => m.email.toLowerCase().trim() === normalizedEmail);
-    if (emailExistsArchived) {
-      alert("Cet email appartient à un membre archivé.\n\nVeuillez aller dans l'onglet 'Archivés' et cliquer sur 'Désarchiver' au lieu de l'ajouter à nouveau.");
-      return;
-    }
-
-    console.log("🔍 DEBUG TeamSettings handleAddMember - secureTeamId:", user?.secureTeamId);
+    if (activeMembers.some(m => m.email.toLowerCase().trim() === normalizedEmail)) { alert("Cet email est déjà utilisé par un membre actif."); return; }
+    if (archivedMembers.some(m => m.email.toLowerCase().trim() === normalizedEmail)) { alert("Cet email appartient à un membre archivé. Désarchivez-le plutôt."); return; }
 
     try {
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
-      
       if (user?.secureTeamId) {
-        console.log("✅ TeamSettings handleAddMember: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ TeamSettings handleAddMember: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
 
-      await databases.createDocument(
-        DATABASE_ID, 
-        'team_members', 
-        ID.unique(), 
-        {
-          userId: 'pending', 
-          teamId: teamId, 
-          roleId: newMemberRoleId, 
-          email: newMemberEmail,
-          name: newMemberName, 
-          status: 'active', 
-          invitedAt: new Date().toISOString(),
-          joinedAt: new Date().toISOString(), 
-          invitedBy: user.$id
-        },
-        perms
-      );
+      await databases.createDocument(DATABASE_ID, 'team_members', ID.unique(), {
+        userId: 'pending', teamId: teamId, roleId: newMemberRoleId, email: newMemberEmail, name: newMemberName, 
+        status: 'active', invitedAt: new Date().toISOString(), joinedAt: new Date().toISOString(), invitedBy: user?.$id // ✅ CORRECTION TS18047
+      }, perms);
 
       const joinLink = `${window.location.origin}/join-team?email=${encodeURIComponent(newMemberEmail)}`;
-      setGeneratedLink(joinLink);
-      setGeneratedEmail(newMemberEmail);
-      setShowLinkModal(true);
-      
-      setShowMemberModal(false);
-      setNewMemberName(''); 
-      setNewMemberEmail(''); 
-      setNewMemberRoleId('');
+      setGeneratedLink(joinLink); setGeneratedEmail(newMemberEmail); setShowLinkModal(true);
+      setShowMemberModal(false); setNewMemberName(''); setNewMemberEmail(''); setNewMemberRoleId('');
       loadData();
-    } catch (e: any) { 
-      console.error('Erreur handleAddMember:', e); 
-      alert(`Erreur: ${e.message}`); 
-    }
+    } catch (e: any) { alert(`Erreur: ${e.message}`); }
   };
 
   if (permLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50">Vérification des droits...</div>;
@@ -463,16 +317,10 @@ export default function TeamSettings() {
           </div>
 
           <div className="flex border-b border-slate-200 mb-4">
-            <button 
-              onClick={() => setViewMode('active')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-            >
+            <button onClick={() => setViewMode('active')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               Actifs ({activeMembers.length})
             </button>
-            <button 
-              onClick={() => setViewMode('archived')}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-            >
+            <button onClick={() => setViewMode('archived')} className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}>
               Archivés ({archivedMembers.length})
             </button>
           </div>
@@ -490,11 +338,7 @@ export default function TeamSettings() {
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {currentMembersList.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="p-8 text-center text-slate-500 text-sm">
-                      {viewMode === 'active' ? 'Aucun membre actif dans l\'équipe.' : 'Aucun membre archivé.'}
-                    </td>
-                  </tr>
+                  <tr><td colSpan={5} className="p-8 text-center text-slate-500 text-sm">{viewMode === 'active' ? 'Aucun membre actif dans l\'équipe.' : 'Aucun membre archivé.'}</td></tr>
                 ) : (
                   currentMembersList.map(member => (
                     <tr key={member.$id} className="hover:bg-slate-50">
@@ -502,9 +346,7 @@ export default function TeamSettings() {
                       <td className="p-4 text-sm text-slate-600">{member.email}</td>
                       <td className="p-4 text-sm text-slate-600">{member.role.name}</td>
                       <td className="p-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${
-                          member.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'
-                        }`}>
+                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${member.status === 'active' ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-600'}`}>
                           {member.status === 'active' ? 'Actif' : 'Archivé'}
                         </span>
                       </td>
@@ -513,47 +355,20 @@ export default function TeamSettings() {
                           {viewMode === 'active' ? (
                             <>
                               {hasPermission('team.invite') && (
-                                <button 
-                                  onClick={() => {
-                                    const link = `${window.location.origin}/join-team?email=${encodeURIComponent(member.email)}`;
-                                    copyToClipboard(link, member.$id);
-                                  }}
-                                  className={`p-1.5 rounded transition-colors ${
-                                    copiedMemberId === member.$id ? 'text-green-600 bg-green-50' : 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'
-                                  }`}
-                                  title="Copier le lien d'inscription"
-                                >
+                                <button onClick={() => { const link = `${window.location.origin}/join-team?email=${encodeURIComponent(member.email)}`; copyToClipboard(link, member.$id); }} className={`p-1.5 rounded transition-colors ${copiedMemberId === member.$id ? 'text-green-600 bg-green-50' : 'text-blue-500 hover:text-blue-700 hover:bg-blue-50'}`} title="Copier le lien d'inscription">
                                   {copiedMemberId === member.$id ? <Check size={14} /> : <Copy size={14} />}
                                 </button>
                               )}
                               {hasPermission('team.manage_roles') && (
-                                <button 
-                                  onClick={() => openEditRoleModal(member)} 
-                                  className="text-purple-500 hover:text-purple-700 hover:bg-purple-50 p-1.5 rounded transition-colors" 
-                                  title="Modifier le rôle"
-                                >
-                                  <Edit3 size={14} />
-                                </button>
+                                <button onClick={() => openEditRoleModal(member)} className="text-purple-500 hover:text-purple-700 hover:bg-purple-50 p-1.5 rounded transition-colors" title="Modifier le rôle"><Edit3 size={14} /></button>
                               )}
                               {hasPermission('team.remove_member') && (
-                                <button 
-                                  onClick={() => handleArchiveMember(member.$id, member.email)} 
-                                  className="text-orange-500 hover:text-orange-700 hover:bg-orange-50 p-1.5 rounded transition-colors" 
-                                  title="Archiver ce membre"
-                                >
-                                  <Archive size={14} />
-                                </button>
+                                <button onClick={() => handleArchiveMember(member.$id, member.email)} className="text-orange-500 hover:text-orange-700 hover:bg-orange-50 p-1.5 rounded transition-colors" title="Archiver ce membre"><Archive size={14} /></button>
                               )}
                             </>
                           ) : (
                             hasPermission('team.remove_member') && (
-                              <button 
-                                onClick={() => handleUnarchiveMember(member.$id, member.email)} 
-                                className="text-green-600 hover:text-green-800 hover:bg-green-50 p-1.5 rounded transition-colors flex items-center gap-1 text-xs font-medium" 
-                                title="Désarchiver et remettre dans l'équipe"
-                              >
-                                <RotateCcw size={14} /> Désarchiver
-                              </button>
+                              <button onClick={() => handleUnarchiveMember(member.$id, member.email)} className="text-green-600 hover:text-green-800 hover:bg-green-50 p-1.5 rounded transition-colors flex items-center gap-1 text-xs font-medium" title="Désarchiver"><RotateCcw size={14} /> Désarchiver</button>
                             )
                           )}
                         </div>
@@ -625,11 +440,7 @@ export default function TeamSettings() {
               <p className="text-sm text-slate-600">Changer le rôle de <strong>{editingMember.name || editingMember.email}</strong></p>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Nouveau rôle</label>
-                <select 
-                  value={selectedNewRoleId} 
-                  onChange={(e) => setSelectedNewRoleId(e.target.value)} 
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none"
-                >
+                <select value={selectedNewRoleId} onChange={(e) => setSelectedNewRoleId(e.target.value)} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white focus:ring-2 focus:ring-purple-500 outline-none">
                   {roles.map(r => <option key={r.$id} value={r.$id}>{r.name}</option>)}
                 </select>
               </div>
@@ -686,9 +497,7 @@ export default function TeamSettings() {
               <button onClick={() => setShowLinkModal(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
             </div>
             <div className="p-6 space-y-4">
-              <p className="text-sm text-slate-600">
-                Envoyez ce lien à <strong>{generatedEmail}</strong> pour qu'il puisse créer son compte :
-              </p>
+              <p className="text-sm text-slate-600">Envoyez ce lien à <strong>{generatedEmail}</strong> pour qu'il puisse créer son compte :</p>
               <a href={generatedLink} target="_blank" rel="noopener noreferrer" className="block bg-purple-50 border border-purple-200 p-3 rounded-lg text-sm text-purple-700 hover:bg-purple-100 transition-colors break-all">
                 {generatedLink}
               </a>

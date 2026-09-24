@@ -13,7 +13,7 @@ interface MigrationResult {
 }
 
 export default function SecurityMigration() {
-  const { user } = useAuth();
+  const { _user } = useAuth();
   const [migrating, setMigrating] = useState(false);
   const [results, setResults] = useState<MigrationResult[]>([]);
   const [currentStep, setCurrentStep] = useState('');

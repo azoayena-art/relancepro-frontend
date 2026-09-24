@@ -45,10 +45,7 @@ export default function Receipts() {
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
-    
-    // ✅ DEBUG : Vérifier que secureTeamId est disponible
     console.log("🔍 DEBUG Receipts - secureTeamId:", user?.secureTeamId);
-    
     loadReceipts();
   }, [user, viewMode]);
 
@@ -56,10 +53,11 @@ export default function Receipts() {
     try {
       setLoading(true);
       let teamId = null;
-      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user.$id)]);
+      // ✅ CORRIGÉ : user?.$id
+      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user?.$id)]);
       if (teamsRes.documents.length > 0) teamId = teamsRes.documents[0].$id;
       else {
-        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
+        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user?.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
       if (!teamId) { setLoading(false); return; }
@@ -83,18 +81,14 @@ export default function Receipts() {
       alert('Le PDF de ce reçu n\'est pas disponible.');
       return;
     }
-    
-    // ✅ VÉRIFICATION DE SÉCURITÉ : Le reçu appartient à l'équipe
     if (receipt.teamId !== currentTeamId) {
       alert('⚠️ Accès refusé : Ce reçu n\'appartient pas à votre équipe.');
       return;
     }
-    
     try {
       const base64Data = receipt.pdfBase64.includes('base64,') 
         ? receipt.pdfBase64.split('base64,')[1] 
         : receipt.pdfBase64;
-        
       const byteCharacters = atob(base64Data);
       const byteNumbers = new Array(byteCharacters.length);
       for (let i = 0; i < byteCharacters.length; i++) {
@@ -115,12 +109,10 @@ export default function Receipts() {
   };
 
   const handleArchive = async (receipt: Receipt) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ
     if (receipt.teamId !== currentTeamId) {
       alert('⚠️ Accès refusé : Ce reçu n\'appartient pas à votre équipe.');
       return;
     }
-    
     if (!confirm(`Archiver le reçu ${receipt.receiptNumber} ?\nIl sera masqué de la liste principale mais conservé pour la comptabilité.`)) return;
     try {
       await databases.updateDocument(DATABASE_ID, 'receipts', receipt.$id, { status: 'archived' });
@@ -131,12 +123,10 @@ export default function Receipts() {
   };
 
   const handleUnarchive = async (receipt: Receipt) => {
-    // ✅ VÉRIFICATION DE SÉCURITÉ
     if (receipt.teamId !== currentTeamId) {
       alert('⚠️ Accès refusé : Ce reçu n\'appartient pas à votre équipe.');
       return;
     }
-    
     try {
       await databases.updateDocument(DATABASE_ID, 'receipts', receipt.$id, { status: 'active' });
       setReceipts(receipts.map(r => r.$id === receipt.$id ? { ...r, status: 'active' } : r));
@@ -269,34 +259,18 @@ export default function Receipts() {
                       </td>
                       <td className="px-6 py-4 text-right">
                         <div className="flex justify-end gap-1">
-                          <button
-                            onClick={() => setPreviewReceipt(r)}
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
-                            title="Aperçu"
-                          >
+                          <button onClick={() => setPreviewReceipt(r)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Aperçu">
                             <Eye size={16} />
                           </button>
-                          <button
-                            onClick={() => handleDownload(r)}
-                            className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg"
-                            title="Télécharger PDF"
-                          >
+                          <button onClick={() => handleDownload(r)} className="p-2 text-slate-400 hover:text-teal-600 hover:bg-teal-50 rounded-lg" title="Télécharger PDF">
                             <Download size={16} />
                           </button>
                           {viewMode === 'active' ? (
-                            <button
-                              onClick={() => handleArchive(r)}
-                              className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg"
-                              title="Archiver"
-                            >
+                            <button onClick={() => handleArchive(r)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg" title="Archiver">
                               <Archive size={16} />
                             </button>
                           ) : (
-                            <button
-                              onClick={() => handleUnarchive(r)}
-                              className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg"
-                              title="Désarchiver"
-                            >
+                            <button onClick={() => handleUnarchive(r)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Désarchiver">
                               <RotateCcw size={16} />
                             </button>
                           )}
@@ -320,31 +294,17 @@ export default function Receipts() {
                 Aperçu - {previewReceipt.receiptNumber}
               </h2>
               <div className="flex gap-2">
-                <button
-                  onClick={() => handleDownload(previewReceipt)}
-                  className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 flex items-center gap-2"
-                >
+                <button onClick={() => handleDownload(previewReceipt)} className="px-4 py-2 text-sm font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 flex items-center gap-2">
                   <Download size={16} /> Télécharger
                 </button>
-                <button
-                  onClick={() => setPreviewReceipt(null)}
-                  className="p-2 hover:bg-slate-100 rounded-lg"
-                >
-                  ✕
-                </button>
+                <button onClick={() => setPreviewReceipt(null)} className="p-2 hover:bg-slate-100 rounded-lg">✕</button>
               </div>
             </div>
             <div className="flex-1 p-4 overflow-hidden">
               {previewReceipt.pdfBase64 ? (
-                <iframe
-                  src={previewReceipt.pdfBase64}
-                  className="w-full h-full border rounded-lg"
-                  title="Aperçu du reçu"
-                />
+                <iframe src={previewReceipt.pdfBase64} className="w-full h-full border rounded-lg" title="Aperçu du reçu" />
               ) : (
-                <div className="text-center py-12 text-slate-500">
-                  PDF non disponible pour ce reçu.
-                </div>
+                <div className="text-center py-12 text-slate-500">PDF non disponible pour ce reçu.</div>
               )}
             </div>
           </div>
