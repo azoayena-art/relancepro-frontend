@@ -1,0 +1,10 @@
+{
+  "name": "relancepro-scripts",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "setup-appwrite.js",
+  "dependencies": {
+    "dotenv": "^18.0.0",
+    "node-appwrite": "^29.0.0"
+  }
+}

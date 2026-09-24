@@ -1,0 +1,24 @@
+# Dépendances
+node_modules/
+frontend/node_modules/
+
+# Fichiers sensibles (NE JAMAIS POUSSER LES CLÉS)
+.env
+frontend/.env
+
+# Build
+frontend/dist/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Scripts de migration (trop volumineux pour GitHub)
+scripts/*.js
+
+# Logs
+*.log
