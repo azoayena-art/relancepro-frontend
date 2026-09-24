@@ -488,30 +488,12 @@ export default function Quotes() {
 
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
-  const generatePDF = async (qd: Quote) => {
+    const generatePDF = async (qd: Quote) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
     try { items = JSON.parse(qd.items || '[]'); } catch(e) {}
     
-    // ✅ FORÇAGE EXPLICITE DES TYPES POUR JSPDF
-    const companyName: string = qd.companyName ?? '';
-    const companyAddress: string = qd.companyAddress ?? '';
-    const companyPhone: string = qd.companyPhone ?? '';
-    const companyEmail: string = qd.companyEmail ?? '';
-    const companySiret: string = qd.companySiret ?? '';
-    const companyTva: string = qd.companyTva ?? '';
-    const quoteNumber: string = qd.quoteNumber ?? '';
-    const issueDateStr: string = qd.issueDate ? new Date(qd.issueDate).toLocaleDateString('fr-FR') : '-';
-    const validityDateStr: string = qd.validityDate ? new Date(qd.validityDate).toLocaleDateString('fr-FR') : '';
-    const clientName: string = qd.clientName ?? '';
-    const clientAddress: string = qd.clientAddress ?? '';
-    const clientEmail: string = qd.clientEmail ?? '';
-    const subject: string = qd.subject ?? '';
-    const paymentMethods: string = qd.paymentMethods ?? '';
-    const paymentConditions: string = qd.paymentConditions ?? '';
-    const executionDelay: string = qd.executionDelay ?? '';
-
     const pdfSubtotal = qd.subtotal || 0;
     const pdfDiscount = qd.discount || 0;
     const pdfTax = qd.tax || 0;
@@ -520,7 +502,7 @@ export default function Quotes() {
     const pdfBalance = qd.balance || 0;
     const pdfDiscountAmount = pdfSubtotal * (pdfDiscount / 100);
     const pdfTaxableAmount = pdfSubtotal - pdfDiscountAmount;
-    const pdfIsTvaApplicable = !(companyTva).includes('non applicable');
+    const pdfIsTvaApplicable = !(qd.companyTva || '').includes('non applicable');
 
     let logoB64: string | null = null;
     if (qd.logoFileId) {
@@ -539,21 +521,22 @@ export default function Quotes() {
     }
 
     doc.setFontSize(14); doc.setFont(undefined, 'bold');
-    doc.text(companyName, M, Y + 22);
+    // ✅ CORRECTION : Utilisation de String() pour forcer le type string
+    doc.text(String(qd.companyName || ''), M, Y + 22);
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
     let infoY = Y + 27;
-    if (companyAddress) { doc.text(companyAddress, M, infoY); infoY += 4; }
-    if (companyPhone) { doc.text(`Tél: ${companyPhone}`, M, infoY); infoY += 4; }
-    if (companyEmail) { doc.text(`Email: ${companyEmail}`, M, infoY); infoY += 4; }
-    if (companySiret) { doc.text(`SIRET: ${companySiret}`, M, infoY); infoY += 4; }
-    if (companyTva && !companyTva.includes('non')) { doc.text(`TVA: ${companyTva}`, M, infoY); infoY += 4; }
+    if (qd.companyAddress) { doc.text(String(qd.companyAddress), M, infoY); infoY += 4; }
+    if (qd.companyPhone) { doc.text(`Tél: ${String(qd.companyPhone)}`, M, infoY); infoY += 4; }
+    if (qd.companyEmail) { doc.text(`Email: ${String(qd.companyEmail)}`, M, infoY); infoY += 4; }
+    if (qd.companySiret) { doc.text(`SIRET: ${String(qd.companySiret)}`, M, infoY); infoY += 4; }
+    if (qd.companyTva && !qd.companyTva.includes('non')) { doc.text(`TVA: ${String(qd.companyTva)}`, M, infoY); infoY += 4; }
 
     const rX = W - M;
     doc.setFontSize(16); doc.setFont(undefined, 'bold');
-    doc.text(`DEVIS N° ${quoteNumber}`, rX, Y + 5, { align: 'right' });
+    doc.text(`DEVIS N° ${String(qd.quoteNumber || '')}`, rX, Y + 5, { align: 'right' });
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
-    doc.text(`Date: ${issueDateStr}`, rX, Y + 10, { align: 'right' });
-    if (validityDateStr) doc.text(`Valable jusqu'au: ${validityDateStr}`, rX, Y + 14, { align: 'right' });
+    doc.text(`Date: ${qd.issueDate ? new Date(qd.issueDate).toLocaleDateString('fr-FR') : '-'}`, rX, Y + 10, { align: 'right' });
+    if (qd.validityDate) doc.text(`Valable jusqu'au: ${String(new Date(qd.validityDate).toLocaleDateString('fr-FR'))}`, rX, Y + 14, { align: 'right' });
 
     const clientBoxX = rX - 60;
     const clientBoxY = Y + 18;
@@ -562,14 +545,14 @@ export default function Quotes() {
     doc.setFontSize(8); doc.setFont(undefined, 'bold');
     doc.text('CLIENT', clientBoxX + 2, clientBoxY + 4);
     doc.setFont(undefined, 'normal'); doc.setFontSize(9);
-    doc.text(clientName, clientBoxX + 2, clientBoxY + 9);
-    if (clientAddress) doc.text(clientAddress.substring(0, 50), clientBoxX + 2, clientBoxY + 13);
-    if (clientEmail) doc.text(clientEmail, clientBoxX + 2, clientBoxY + 17);
+    doc.text(String(qd.clientName || ''), clientBoxX + 2, clientBoxY + 9);
+    if (qd.clientAddress) doc.text(String(qd.clientAddress).substring(0, 50), clientBoxX + 2, clientBoxY + 13);
+    if (qd.clientEmail) doc.text(String(qd.clientEmail), clientBoxX + 2, clientBoxY + 17);
 
     Y = Math.max(infoY, clientBoxY + 25) + 5;
-    if (subject) {
+    if (qd.subject) {
       doc.setFontSize(11); doc.setFont(undefined, 'bold');
-      doc.text(`Objet: ${subject}`, W / 2, Y, { align: 'center' });
+      doc.text(`Objet: ${String(qd.subject)}`, W / 2, Y, { align: 'center' });
       Y += 8;
     }
 
@@ -629,26 +612,26 @@ export default function Quotes() {
       ty += 6;
     }
 
-    if (paymentMethods || paymentConditions || executionDelay) {
+    if (qd.paymentMethods || qd.paymentConditions || qd.executionDelay) {
       ty += 5; doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 0);
       doc.text('Conditions de règlement', M, ty);
       doc.setDrawColor(150); doc.setLineWidth(0.3); doc.line(M, ty + 1, W - M, ty + 1);
       ty += 6; doc.setFontSize(8); doc.setFont(undefined, 'normal');
-      if (paymentMethods) { doc.text(`Mode: ${paymentMethods}`, M, ty); ty += 4; }
-      if (paymentConditions) { doc.text(`Conditions: ${paymentConditions}`, M, ty); ty += 4; }
-      if (executionDelay) { doc.text(`Délai: ${executionDelay}`, M, ty); ty += 4; }
+      if (qd.paymentMethods) { doc.text(`Mode: ${String(qd.paymentMethods)}`, M, ty); ty += 4; }
+      if (qd.paymentConditions) { doc.text(`Conditions: ${String(qd.paymentConditions)}`, M, ty); ty += 4; }
+      if (qd.executionDelay) { doc.text(`Délai: ${String(qd.executionDelay)}`, M, ty); ty += 4; }
       ty += 2; doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
       doc.text('Pénalités de retard : 3x le taux d\'intérêt légal (loi 2008-776).', M, ty);
       ty += 4; doc.text('Indemnité forfaitaire pour frais de recouvrement : 40€ (art D.441-5).', M, ty);
       ty += 4;
     }
 
-    if (!pdfIsTvaApplicable && companyTva) {
+    if (!pdfIsTvaApplicable && qd.companyTva) {
       doc.setFontSize(7); doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
-      doc.text(companyTva, M, 285);
+      doc.text(String(qd.companyTva), M, 285);
     }
 
-    doc.save(`Devis_${quoteNumber}.pdf`);
+    doc.save(`Devis_${String(qd.quoteNumber || '')}.pdf`);
   };
 
   const filtered = quotes.filter(q => {
