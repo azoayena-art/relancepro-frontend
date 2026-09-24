@@ -488,8 +488,9 @@ export default function Quotes() {
 
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
-    const generatePDF = async (qd: Quote) => {
-    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  // ✅ SOLUTION RADICALE : Utiliser 'any' pour contourner le typage strict de jsPDF
+  const generatePDF = async (qd: Quote) => {
+    const doc: any = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
     try { items = JSON.parse(qd.items || '[]'); } catch(e) {}
@@ -521,22 +522,21 @@ export default function Quotes() {
     }
 
     doc.setFontSize(14); doc.setFont(undefined, 'bold');
-    // ✅ CORRECTION : Utilisation de String() pour forcer le type string
-    doc.text(String(qd.companyName || ''), M, Y + 22);
+    doc.text(qd.companyName || '', M, Y + 22);
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
     let infoY = Y + 27;
-    if (qd.companyAddress) { doc.text(String(qd.companyAddress), M, infoY); infoY += 4; }
-    if (qd.companyPhone) { doc.text(`Tél: ${String(qd.companyPhone)}`, M, infoY); infoY += 4; }
-    if (qd.companyEmail) { doc.text(`Email: ${String(qd.companyEmail)}`, M, infoY); infoY += 4; }
-    if (qd.companySiret) { doc.text(`SIRET: ${String(qd.companySiret)}`, M, infoY); infoY += 4; }
-    if (qd.companyTva && !qd.companyTva.includes('non')) { doc.text(`TVA: ${String(qd.companyTva)}`, M, infoY); infoY += 4; }
+    if (qd.companyAddress) { doc.text(qd.companyAddress, M, infoY); infoY += 4; }
+    if (qd.companyPhone) { doc.text(`Tél: ${qd.companyPhone}`, M, infoY); infoY += 4; }
+    if (qd.companyEmail) { doc.text(`Email: ${qd.companyEmail}`, M, infoY); infoY += 4; }
+    if (qd.companySiret) { doc.text(`SIRET: ${qd.companySiret}`, M, infoY); infoY += 4; }
+    if (qd.companyTva && !qd.companyTva.includes('non')) { doc.text(`TVA: ${qd.companyTva}`, M, infoY); infoY += 4; }
 
     const rX = W - M;
     doc.setFontSize(16); doc.setFont(undefined, 'bold');
-    doc.text(`DEVIS N° ${String(qd.quoteNumber || '')}`, rX, Y + 5, { align: 'right' });
+    doc.text(`DEVIS N° ${qd.quoteNumber}`, rX, Y + 5, { align: 'right' });
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
     doc.text(`Date: ${qd.issueDate ? new Date(qd.issueDate).toLocaleDateString('fr-FR') : '-'}`, rX, Y + 10, { align: 'right' });
-    if (qd.validityDate) doc.text(`Valable jusqu'au: ${String(new Date(qd.validityDate).toLocaleDateString('fr-FR'))}`, rX, Y + 14, { align: 'right' });
+    if (qd.validityDate) doc.text(`Valable jusqu'au: ${new Date(qd.validityDate).toLocaleDateString('fr-FR')}`, rX, Y + 14, { align: 'right' });
 
     const clientBoxX = rX - 60;
     const clientBoxY = Y + 18;
@@ -545,14 +545,14 @@ export default function Quotes() {
     doc.setFontSize(8); doc.setFont(undefined, 'bold');
     doc.text('CLIENT', clientBoxX + 2, clientBoxY + 4);
     doc.setFont(undefined, 'normal'); doc.setFontSize(9);
-    doc.text(String(qd.clientName || ''), clientBoxX + 2, clientBoxY + 9);
-    if (qd.clientAddress) doc.text(String(qd.clientAddress).substring(0, 50), clientBoxX + 2, clientBoxY + 13);
-    if (qd.clientEmail) doc.text(String(qd.clientEmail), clientBoxX + 2, clientBoxY + 17);
+    doc.text(qd.clientName || '', clientBoxX + 2, clientBoxY + 9);
+    if (qd.clientAddress) doc.text(qd.clientAddress.substring(0, 50), clientBoxX + 2, clientBoxY + 13);
+    if (qd.clientEmail) doc.text(qd.clientEmail, clientBoxX + 2, clientBoxY + 17);
 
     Y = Math.max(infoY, clientBoxY + 25) + 5;
     if (qd.subject) {
       doc.setFontSize(11); doc.setFont(undefined, 'bold');
-      doc.text(`Objet: ${String(qd.subject)}`, W / 2, Y, { align: 'center' });
+      doc.text(`Objet: ${qd.subject}`, W / 2, Y, { align: 'center' });
       Y += 8;
     }
 
@@ -579,7 +579,7 @@ export default function Quotes() {
       }
     });
 
-    let ty = (doc as any).lastAutoTable.finalY + 8;
+    let ty = doc.lastAutoTable.finalY + 8;
     const totalsX = W - M - 60;
     doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(0, 0, 0);
     
@@ -617,9 +617,9 @@ export default function Quotes() {
       doc.text('Conditions de règlement', M, ty);
       doc.setDrawColor(150); doc.setLineWidth(0.3); doc.line(M, ty + 1, W - M, ty + 1);
       ty += 6; doc.setFontSize(8); doc.setFont(undefined, 'normal');
-      if (qd.paymentMethods) { doc.text(`Mode: ${String(qd.paymentMethods)}`, M, ty); ty += 4; }
-      if (qd.paymentConditions) { doc.text(`Conditions: ${String(qd.paymentConditions)}`, M, ty); ty += 4; }
-      if (qd.executionDelay) { doc.text(`Délai: ${String(qd.executionDelay)}`, M, ty); ty += 4; }
+      if (qd.paymentMethods) { doc.text(`Mode: ${qd.paymentMethods}`, M, ty); ty += 4; }
+      if (qd.paymentConditions) { doc.text(`Conditions: ${qd.paymentConditions}`, M, ty); ty += 4; }
+      if (qd.executionDelay) { doc.text(`Délai: ${qd.executionDelay}`, M, ty); ty += 4; }
       ty += 2; doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
       doc.text('Pénalités de retard : 3x le taux d\'intérêt légal (loi 2008-776).', M, ty);
       ty += 4; doc.text('Indemnité forfaitaire pour frais de recouvrement : 40€ (art D.441-5).', M, ty);
@@ -628,10 +628,10 @@ export default function Quotes() {
 
     if (!pdfIsTvaApplicable && qd.companyTva) {
       doc.setFontSize(7); doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
-      doc.text(String(qd.companyTva), M, 285);
+      doc.text(qd.companyTva, M, 285);
     }
 
-    doc.save(`Devis_${String(qd.quoteNumber || '')}.pdf`);
+    doc.save(`Devis_${qd.quoteNumber}.pdf`);
   };
 
   const filtered = quotes.filter(q => {
