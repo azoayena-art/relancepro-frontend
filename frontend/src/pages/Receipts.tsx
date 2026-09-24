@@ -5,9 +5,9 @@ import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 import {
   ChevronLeft, Download, Search, FileText, Calendar,
-  DollarSign, Eye, Archive, RotateCcw
+  Eye, Archive, RotateCcw
 } from 'lucide-react';
-import { Query, Permission, Role } from 'appwrite';
+import { Query } from 'appwrite';
 
 interface Receipt {
   $id: string;
@@ -50,14 +50,17 @@ export default function Receipts() {
   }, [user, viewMode]);
 
   const loadReceipts = async () => {
+    // ✅ GUARD CLAUSE : On s'assure que user n'est pas null AVANT d'utiliser user.$id
+    if (!user) return;
+    
     try {
       setLoading(true);
       let teamId = null;
-      // ✅ CORRIGÉ : user?.$id
-      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user?.$id)]);
+      // ✅ CORRECTION : user.$id (pas user?.$id) car le guard clause garantit qu'il n'est pas null
+      const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user.$id)]);
       if (teamsRes.documents.length > 0) teamId = teamsRes.documents[0].$id;
       else {
-        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user?.$id)]);
+        const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
       if (!teamId) { setLoading(false); return; }

@@ -80,10 +80,7 @@ export default function Quotes() {
   const [generating, setGenerating] = useState(false);
 
   const [showAdvanceModal, setShowAdvanceModal] = useState(false);
-  const [advanceForm, setAdvanceForm] = useState({
-    amount: '',
-    quoteId: ''
-  });
+  const [advanceForm, setAdvanceForm] = useState({ amount: '', quoteId: '' });
 
   useEffect(() => {
     if (!permLoading && !hasPermission('quotes.view')) {
@@ -130,6 +127,7 @@ export default function Quotes() {
   }, [quotes]);
 
   const loadCompanySettings = async () => {
+    if (!user) return;
     try {
       const res = await databases.listDocuments(DATABASE_ID, 'company_settings', [Query.equal('userId', user.$id)]);
       if (res.documents.length > 0) setCompanySettings(res.documents[0] as unknown as CompanySettings);
@@ -137,6 +135,7 @@ export default function Quotes() {
   };
 
   const loadData = async (isBackground = false) => {
+    if (!user) return;
     if (!isBackground) setLoading(true);
     try {
       let teamId = null;
@@ -217,21 +216,17 @@ export default function Quotes() {
 
   const handleCopyLink = async (quote: Quote) => {
     if (!quote.clientToken) { alert('Ce devis n\'a pas encore été envoyé au client.'); return; }
-    
     if (quote.teamId && quote.teamId !== currentTeamId) {
       alert('⚠️ Accès refusé');
       return;
     }
-    
     const link = `${window.location.origin}/v/${quote.clientToken}`;
     try {
       await navigator.clipboard.writeText(link);
       setCopiedToken(quote.clientToken);
-      
-      if (user && currentTeamId) {
+      if (user && user.$id && currentTeamId) {
         await logAuditAction(user.$id, currentTeamId, 'read', 'quote', quote.$id, { action: 'share_link' });
       }
-      
       setTimeout(() => setCopiedToken(null), 2000);
     } catch { alert(`Lien :\n${link}`); }
   };
@@ -241,11 +236,9 @@ export default function Quotes() {
     try {
       await verifyDocumentAccess('quotes', id, currentTeamId!);
       await databases.updateDocument(DATABASE_ID, 'quotes', id, { status: 'Archivé' });
-      
-      if (user) {
-        await logAuditAction(user.$id, currentTeamId!, 'update', 'quote', id, { action: 'archive' });
+      if (user && user.$id && currentTeamId) {
+        await logAuditAction(user.$id, currentTeamId, 'update', 'quote', id, { action: 'archive' });
       }
-      
       await loadData();
     } catch (error: any) { 
       alert(`Erreur : ${error.message}`); 
@@ -256,11 +249,9 @@ export default function Quotes() {
     try {
       await verifyDocumentAccess('quotes', id, currentTeamId!);
       await databases.updateDocument(DATABASE_ID, 'quotes', id, { status: 'Brouillon' });
-      
-      if (user) {
-        await logAuditAction(user.$id, currentTeamId!, 'update', 'quote', id, { action: 'unarchive' });
+      if (user && user.$id && currentTeamId) {
+        await logAuditAction(user.$id, currentTeamId, 'update', 'quote', id, { action: 'unarchive' });
       }
-      
       await loadData();
       setViewMode('active');
     } catch (error: any) { 
@@ -284,11 +275,9 @@ export default function Quotes() {
   };
 
   const handleChooseFinal = async () => {
-    if (!selectedQuoteForInvoice || !currentTeamId || !user) return;
+    if (!selectedQuoteForInvoice || !currentTeamId || !user || !user.$id) return;
     
-    // ✅ VÉRIFICATION DE SÉCURITÉ
     console.log("🔍 DEBUG Quotes handleChooseFinal - secureTeamId:", user?.secureTeamId);
-    
     setGenerating(true);
     
     try {
@@ -343,9 +332,7 @@ export default function Quotes() {
         notes: `Facture finale générée depuis le devis ${quote.quoteNumber}`
       };
 
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
-      
       if (user?.secureTeamId) {
         console.log("✅ Quotes: Utilisation de la sécurité maximale (secureTeamId)");
         perms = [
@@ -364,15 +351,11 @@ export default function Quotes() {
 
       console.log("🚀 Quotes handleChooseFinal: Envoi avec permissions:", perms);
 
-      await databases.createDocument(
-        DATABASE_ID, 
-        'invoices', 
-        AppwriteID.unique(), 
-        payload,
-        perms
-      );
+      await databases.createDocument(DATABASE_ID, 'invoices', AppwriteID.unique(), payload, perms);
       
-      await logAuditAction(user.$id, currentTeamId!, 'create', 'invoice', '', { fromQuote: quote.$id });
+      if (user.$id && currentTeamId) {
+        await logAuditAction(user.$id, currentTeamId, 'create', 'invoice', '', { fromQuote: quote.$id });
+      }
 
       await databases.updateDocument(DATABASE_ID, 'quotes', quote.$id, { status: 'Facturé' });
 
@@ -390,16 +373,14 @@ export default function Quotes() {
   };
 
   const handleGenerateAdvanceInvoice = async () => {
-    if (!selectedQuoteForInvoice || !currentTeamId || !user) return;
+    if (!selectedQuoteForInvoice || !currentTeamId || !user || !user.$id) return;
     const amount = parseFloat(advanceForm.amount);
     if (!amount || amount <= 0) {
       alert('Veuillez saisir un montant d\'acompte valide.');
       return;
     }
 
-    // ✅ VÉRIFICATION DE SÉCURITÉ
     console.log("🔍 DEBUG Quotes handleGenerateAdvanceInvoice - secureTeamId:", user?.secureTeamId);
-
     setGenerating(true);
     try {
       const quote = selectedQuoteForInvoice;
@@ -463,9 +444,7 @@ export default function Quotes() {
         notes: `Acompte sur devis ${quote.quoteNumber}`
       };
 
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
-      
       if (user?.secureTeamId) {
         console.log("✅ Quotes: Utilisation de la sécurité maximale (secureTeamId)");
         perms = [
@@ -484,13 +463,7 @@ export default function Quotes() {
 
       console.log("🚀 Quotes handleGenerateAdvanceInvoice: Envoi avec permissions:", perms);
 
-      await databases.createDocument(
-        DATABASE_ID, 
-        'invoices', 
-        AppwriteID.unique(), 
-        payload,
-        perms
-      );
+      await databases.createDocument(DATABASE_ID, 'invoices', AppwriteID.unique(), payload, perms);
 
       setShowAdvanceModal(false);
       setSelectedQuoteForInvoice(null);
@@ -886,9 +859,9 @@ export default function Quotes() {
                       <p className="text-sm text-slate-600 mt-1">
                         Pour les chantiers longs. Demandez un acompte au client avant de commencer les travaux.
                       </p>
-                      {selectedQuoteForInvoice.deposit > 0 && (
+                      {(selectedQuoteForInvoice.deposit || 0) > 0 && (
                         <p className="text-xs text-blue-600 mt-2 font-medium">
-                          💡 Acompte suggéré : {fm(selectedQuoteForInvoice.deposit)}
+                          💡 Acompte suggéré : {fm(selectedQuoteForInvoice.deposit || 0)}
                         </p>
                       )}
                     </div>
@@ -957,7 +930,7 @@ export default function Quotes() {
                   type="number" 
                   min="0.01"
                   step="0.01"
-                  max={selectedQuoteForInvoice.total - 0.01}
+                  max={(selectedQuoteForInvoice.total || 0) - 0.01}
                   value={advanceForm.amount} 
                   onChange={e => setAdvanceForm({ ...advanceForm, amount: e.target.value })} 
                   className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-lg font-semibold"

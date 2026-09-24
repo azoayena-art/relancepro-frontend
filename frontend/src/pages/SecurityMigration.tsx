@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { databases, DATABASE_ID } from '../appwrite';
-import { useAuth } from '../context/AuthContext';
 import { Query, Permission, Role } from 'appwrite';
 import { Shield, CheckCircle2, AlertCircle, Loader2, Database, RefreshCw } from 'lucide-react';
 
@@ -13,22 +12,14 @@ interface MigrationResult {
 }
 
 export default function SecurityMigration() {
-  const { _user } = useAuth();
+  // ✅ CORRIGÉ : Suppression de _user qui n'existait pas dans le contexte et n'était pas utilisé
   const [migrating, setMigrating] = useState(false);
   const [results, setResults] = useState<MigrationResult[]>([]);
   const [currentStep, setCurrentStep] = useState('');
 
   const collections = [
-    'prospects',
-    'clients', 
-    'quotes',
-    'invoices',
-    'receipts',
-    'products',
-    'categories',
-    'company_settings',
-    'roles',
-    'team_members'
+    'prospects', 'clients', 'quotes', 'invoices', 'receipts',
+    'products', 'categories', 'company_settings', 'roles', 'team_members'
   ];
 
   const migrateCollection = async (collectionName: string): Promise<MigrationResult> => {
@@ -41,28 +32,19 @@ export default function SecurityMigration() {
     };
 
     try {
-      // Récupérer tous les documents de la collection
-      const response = await databases.listDocuments(
-        DATABASE_ID,
-        collectionName,
-        [Query.limit(1000)]
-      );
-
+      const response = await databases.listDocuments(DATABASE_ID, collectionName, [Query.limit(1000)]);
       result.total = response.documents.length;
       console.log(`📦 ${collectionName}: ${result.total} documents trouvés`);
 
       for (const doc of response.documents) {
         try {
           const teamId = (doc as any).teamId;
-          
-          // Si pas de teamId, on ne peut pas sécuriser
           if (!teamId) {
             console.warn(`⚠️ ${collectionName}/${doc.$id}: Pas de teamId, ignoré`);
             result.skipped++;
             continue;
           }
 
-          // Vérifier si les permissions sont déjà correctes
           const currentPerms = doc.$permissions || [];
           const expectedPerms = [
             `read("team:${teamId}")`,
@@ -70,10 +52,7 @@ export default function SecurityMigration() {
             `delete("team:${teamId}")`
           ];
 
-          // Vérifier si toutes les permissions attendues sont présentes
-          const hasAllPerms = expectedPerms.every(perm => 
-            currentPerms.includes(perm)
-          );
+          const hasAllPerms = expectedPerms.every(perm => currentPerms.includes(perm));
 
           if (hasAllPerms) {
             console.log(`✅ ${collectionName}/${doc.$id}: Déjà sécurisé`);
@@ -81,14 +60,12 @@ export default function SecurityMigration() {
             continue;
           }
 
-          // Mettre à jour les permissions
           console.log(`🔒 ${collectionName}/${doc.$id}: Mise à jour des permissions...`);
-          
           await databases.updateDocument(
             DATABASE_ID,
             collectionName,
             doc.$id,
-            {}, // Pas de mise à jour des données
+            {},
             [
               Permission.read(Role.team(teamId)),
               Permission.update(Role.team(teamId)),
@@ -98,14 +75,12 @@ export default function SecurityMigration() {
 
           result.updated++;
           console.log(`✅ ${collectionName}/${doc.$id}: Sécurisé`);
-
         } catch (error: any) {
           const errorMsg = `${collectionName}/${doc.$id}: ${error.message}`;
           console.error(`❌ ${errorMsg}`);
           result.errors.push(errorMsg);
         }
       }
-
     } catch (error: any) {
       const errorMsg = `Erreur collection ${collectionName}: ${error.message}`;
       console.error(`❌ ${errorMsg}`);
@@ -176,15 +151,9 @@ export default function SecurityMigration() {
             className="w-full flex items-center justify-center gap-2 px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors font-semibold mb-6"
           >
             {migrating ? (
-              <>
-                <Loader2 size={20} className="animate-spin" />
-                {currentStep}
-              </>
+              <><Loader2 size={20} className="animate-spin" />{currentStep}</>
             ) : (
-              <>
-                <Database size={20} />
-                Lancer la migration de sécurité
-              </>
+              <><Database size={20} />Lancer la migration de sécurité</>
             )}
           </button>
 
@@ -216,23 +185,17 @@ export default function SecurityMigration() {
                       <div className="flex gap-3 text-sm">
                         <span className="text-green-600">✅ {result.updated}</span>
                         <span className="text-blue-600">⏭️ {result.skipped}</span>
-                        {result.errors.length > 0 && (
-                          <span className="text-red-600">❌ {result.errors.length}</span>
-                        )}
+                        {result.errors.length > 0 && <span className="text-red-600">❌ {result.errors.length}</span>}
                       </div>
                     </div>
-                    <p className="text-sm text-slate-600">
-                      {result.total} documents traités
-                    </p>
+                    <p className="text-sm text-slate-600">{result.total} documents traités</p>
                     {result.errors.length > 0 && (
                       <div className="mt-2 bg-red-50 border border-red-200 rounded p-2">
                         {result.errors.slice(0, 3).map((err, i) => (
                           <p key={i} className="text-xs text-red-700">{err}</p>
                         ))}
                         {result.errors.length > 3 && (
-                          <p className="text-xs text-red-600 mt-1">
-                            ... et {result.errors.length - 3} autres erreurs
-                          </p>
+                          <p className="text-xs text-red-600 mt-1">... et {result.errors.length - 3} autres erreurs</p>
                         )}
                       </div>
                     )}
@@ -248,9 +211,7 @@ export default function SecurityMigration() {
                 <CheckCircle2 size={20} className="text-green-600 flex-shrink-0 mt-0.5" />
                 <div>
                   <h3 className="font-semibold text-green-900 mb-1">Migration terminée avec succès !</h3>
-                  <p className="text-sm text-green-800">
-                    Tous vos documents sont maintenant sécurisés avec les permissions multi-tenant.
-                  </p>
+                  <p className="text-sm text-green-800">Tous vos documents sont maintenant sécurisés avec les permissions multi-tenant.</p>
                 </div>
               </div>
             </div>
