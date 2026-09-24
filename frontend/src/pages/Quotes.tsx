@@ -489,11 +489,29 @@ export default function Quotes() {
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
   // ✅ SOLUTION FINALE : @ts-ignore sur chaque appel problématique
-  const generatePDF = async (qd: Quote) => {
+    const generatePDF = async (qd: Quote) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
     try { items = JSON.parse(qd.items || '[]'); } catch(e) {}
+    
+    // ✅ CRÉATION DE VARIABLES LOCALES GARANTIES
+    const companyName: string = String(qd.companyName || '');
+    const companyAddress: string = String(qd.companyAddress || '');
+    const companyPhone: string = String(qd.companyPhone || '');
+    const companyEmail: string = String(qd.companyEmail || '');
+    const companySiret: string = String(qd.companySiret || '');
+    const companyTva: string = String(qd.companyTva || '');
+    const quoteNumber: string = String(qd.quoteNumber || '');
+    const clientName: string = String(qd.clientName || '');
+    const clientAddress: string = String(qd.clientAddress || '');
+    const clientEmail: string = String(qd.clientEmail || '');
+    const subject: string = String(qd.subject || '');
+    const paymentMethods: string = String(qd.paymentMethods || '');
+    const paymentConditions: string = String(qd.paymentConditions || '');
+    const executionDelay: string = String(qd.executionDelay || '');
+    const issueDateStr: string = qd.issueDate ? new Date(qd.issueDate).toLocaleDateString('fr-FR') : '-';
+    const validityDateStr: string = qd.validityDate ? new Date(qd.validityDate).toLocaleDateString('fr-FR') : '';
     
     const pdfSubtotal = qd.subtotal || 0;
     const pdfDiscount = qd.discount || 0;
@@ -503,7 +521,7 @@ export default function Quotes() {
     const pdfBalance = qd.balance || 0;
     const pdfDiscountAmount = pdfSubtotal * (pdfDiscount / 100);
     const pdfTaxableAmount = pdfSubtotal - pdfDiscountAmount;
-    const pdfIsTvaApplicable = !(qd.companyTva || '').includes('non applicable');
+    const pdfIsTvaApplicable = !companyTva.includes('non applicable');
 
     let logoB64: string | null = null;
     if (qd.logoFileId) {
@@ -522,42 +540,21 @@ export default function Quotes() {
     }
 
     doc.setFontSize(14); doc.setFont(undefined, 'bold');
-    // @ts-ignore
-    doc.text(qd.companyName || '', M, Y + 22);
+    doc.text(companyName, M, Y + 22);
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
     let infoY = Y + 27;
-    if (qd.companyAddress) { 
-      // @ts-ignore
-      doc.text(qd.companyAddress, M, infoY); infoY += 4; 
-    }
-    if (qd.companyPhone) { 
-      // @ts-ignore
-      doc.text(`Tél: ${qd.companyPhone}`, M, infoY); infoY += 4; 
-    }
-    if (qd.companyEmail) { 
-      // @ts-ignore
-      doc.text(`Email: ${qd.companyEmail}`, M, infoY); infoY += 4; 
-    }
-    if (qd.companySiret) { 
-      // @ts-ignore
-      doc.text(`SIRET: ${qd.companySiret}`, M, infoY); infoY += 4; 
-    }
-    if (qd.companyTva && !qd.companyTva.includes('non')) { 
-      // @ts-ignore
-      doc.text(`TVA: ${qd.companyTva}`, M, infoY); infoY += 4; 
-    }
+    if (companyAddress) { doc.text(companyAddress, M, infoY); infoY += 4; }
+    if (companyPhone) { doc.text(`Tél: ${companyPhone}`, M, infoY); infoY += 4; }
+    if (companyEmail) { doc.text(`Email: ${companyEmail}`, M, infoY); infoY += 4; }
+    if (companySiret) { doc.text(`SIRET: ${companySiret}`, M, infoY); infoY += 4; }
+    if (companyTva && !companyTva.includes('non')) { doc.text(`TVA: ${companyTva}`, M, infoY); infoY += 4; }
 
     const rX = W - M;
     doc.setFontSize(16); doc.setFont(undefined, 'bold');
-    // @ts-ignore
-    doc.text(`DEVIS N° ${qd.quoteNumber}`, rX, Y + 5, { align: 'right' });
+    doc.text(`DEVIS N° ${quoteNumber}`, rX, Y + 5, { align: 'right' });
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
-    // @ts-ignore
-    doc.text(`Date: ${qd.issueDate ? new Date(qd.issueDate).toLocaleDateString('fr-FR') : '-'}`, rX, Y + 10, { align: 'right' });
-    if (qd.validityDate) {
-      // @ts-ignore
-      doc.text(`Valable jusqu'au: ${new Date(qd.validityDate).toLocaleDateString('fr-FR')}`, rX, Y + 14, { align: 'right' });
-    }
+    doc.text(`Date: ${issueDateStr}`, rX, Y + 10, { align: 'right' });
+    if (validityDateStr) doc.text(`Valable jusqu'au: ${validityDateStr}`, rX, Y + 14, { align: 'right' });
 
     const clientBoxX = rX - 60;
     const clientBoxY = Y + 18;
@@ -566,22 +563,14 @@ export default function Quotes() {
     doc.setFontSize(8); doc.setFont(undefined, 'bold');
     doc.text('CLIENT', clientBoxX + 2, clientBoxY + 4);
     doc.setFont(undefined, 'normal'); doc.setFontSize(9);
-    // @ts-ignore
-    doc.text(qd.clientName || '', clientBoxX + 2, clientBoxY + 9);
-    if (qd.clientAddress) {
-      // @ts-ignore
-      doc.text(qd.clientAddress.substring(0, 50), clientBoxX + 2, clientBoxY + 13);
-    }
-    if (qd.clientEmail) {
-      // @ts-ignore
-      doc.text(qd.clientEmail, clientBoxX + 2, clientBoxY + 17);
-    }
+    doc.text(clientName, clientBoxX + 2, clientBoxY + 9);
+    if (clientAddress) doc.text(clientAddress.substring(0, 50), clientBoxX + 2, clientBoxY + 13);
+    if (clientEmail) doc.text(clientEmail, clientBoxX + 2, clientBoxY + 17);
 
     Y = Math.max(infoY, clientBoxY + 25) + 5;
-    if (qd.subject) {
+    if (subject) {
       doc.setFontSize(11); doc.setFont(undefined, 'bold');
-      // @ts-ignore
-      doc.text(`Objet: ${qd.subject}`, W / 2, Y, { align: 'center' });
+      doc.text(`Objet: ${subject}`, W / 2, Y, { align: 'center' });
       Y += 8;
     }
 
@@ -641,36 +630,26 @@ export default function Quotes() {
       ty += 6;
     }
 
-    if (qd.paymentMethods || qd.paymentConditions || qd.executionDelay) {
+    if (paymentMethods || paymentConditions || executionDelay) {
       ty += 5; doc.setFontSize(10); doc.setFont(undefined, 'bold'); doc.setTextColor(0, 0, 0);
       doc.text('Conditions de règlement', M, ty);
       doc.setDrawColor(150); doc.setLineWidth(0.3); doc.line(M, ty + 1, W - M, ty + 1);
       ty += 6; doc.setFontSize(8); doc.setFont(undefined, 'normal');
-      if (qd.paymentMethods) { 
-        // @ts-ignore
-        doc.text(`Mode: ${qd.paymentMethods}`, M, ty); ty += 4; 
-      }
-      if (qd.paymentConditions) { 
-        // @ts-ignore
-        doc.text(`Conditions: ${qd.paymentConditions}`, M, ty); ty += 4; 
-      }
-      if (qd.executionDelay) { 
-        // @ts-ignore
-        doc.text(`Délai: ${qd.executionDelay}`, M, ty); ty += 4; 
-      }
+      if (paymentMethods) { doc.text(`Mode: ${paymentMethods}`, M, ty); ty += 4; }
+      if (paymentConditions) { doc.text(`Conditions: ${paymentConditions}`, M, ty); ty += 4; }
+      if (executionDelay) { doc.text(`Délai: ${executionDelay}`, M, ty); ty += 4; }
       ty += 2; doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
       doc.text('Pénalités de retard : 3x le taux d\'intérêt légal (loi 2008-776).', M, ty);
       ty += 4; doc.text('Indemnité forfaitaire pour frais de recouvrement : 40€ (art D.441-5).', M, ty);
       ty += 4;
     }
 
-    if (!pdfIsTvaApplicable && qd.companyTva) {
+    if (!pdfIsTvaApplicable && companyTva) {
       doc.setFontSize(7); doc.setFont(undefined, 'italic'); doc.setTextColor(100, 100, 100);
-      // @ts-ignore
-      doc.text(qd.companyTva, M, 285);
+      doc.text(companyTva, M, 285);
     }
 
-    doc.save(`Devis_${qd.quoteNumber}.pdf`);
+    doc.save(`Devis_${quoteNumber}.pdf`);
   };
 
   const filtered = quotes.filter(q => {
