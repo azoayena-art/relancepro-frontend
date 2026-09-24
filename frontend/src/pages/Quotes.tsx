@@ -19,21 +19,22 @@ interface QuoteItem {
   unit: string; unitPrice: number; tvaRate: number; total: number; discount: number;
 }
 
+// ✅ SOLUTION : Toutes les propriétés sont NON optionnelles
 interface Quote {
-  $id: string; quoteNumber: string; clientName: string; subject?: string; status: string;
-  total: number; issueDate?: string; validityDate?: string; items?: string;
-  subtotal?: number; discount?: number; tax?: number; deposit?: number; balance?: number;
-  companyName?: string; companyLegalForm?: string; companyAddress?: string;
-  companySiret?: string; companyRcs?: string; companyTva?: string;
-  companyPhone?: string; companyEmail?: string; logoFileId?: string;
-  clientAddress?: string; clientBillingAddress?: string; clientEmail?: string;
-  clientPhone?: string; executionDelay?: string; paymentConditions?: string;
-  paymentMethods?: string; specialConditions?: string; acceptanceMention?: string;
-  bonPourAccord?: boolean; tradeType?: string; insuranceName?: string;
-  insuranceAddress?: string; insurancePolicy?: string; tvaMention?: string; 
-  clientId?: string;
-  clientSignature?: string; clientToken?: string; clientComment?: string;
-  teamId?: string;
+  $id: string; quoteNumber: string; clientName: string; subject: string; status: string;
+  total: number; issueDate: string; validityDate: string; items: string;
+  subtotal: number; discount: number; tax: number; deposit: number; balance: number;
+  companyName: string; companyLegalForm: string; companyAddress: string;
+  companySiret: string; companyRcs: string; companyTva: string;
+  companyPhone: string; companyEmail: string; logoFileId: string;
+  clientAddress: string; clientBillingAddress: string; clientEmail: string;
+  clientPhone: string; executionDelay: string; paymentConditions: string;
+  paymentMethods: string; specialConditions: string; acceptanceMention: string;
+  bonPourAccord: boolean; tradeType: string; insuranceName: string;
+  insuranceAddress: string; insurancePolicy: string; tvaMention: string; 
+  clientId: string;
+  clientSignature: string; clientToken: string; clientComment: string;
+  teamId: string;
 }
 
 interface CompanySettings {
@@ -488,9 +489,8 @@ export default function Quotes() {
 
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
-  // ✅ SOLUTION RADICALE : Utiliser 'any' pour contourner le typage strict de jsPDF
   const generatePDF = async (qd: Quote) => {
-    const doc: any = new jsPDF({ unit: 'mm', format: 'a4' });
+    const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
     try { items = JSON.parse(qd.items || '[]'); } catch(e) {}
@@ -522,7 +522,7 @@ export default function Quotes() {
     }
 
     doc.setFontSize(14); doc.setFont(undefined, 'bold');
-    doc.text(qd.companyName || '', M, Y + 22);
+    doc.text(qd.companyName, M, Y + 22);
     doc.setFontSize(8); doc.setFont(undefined, 'normal');
     let infoY = Y + 27;
     if (qd.companyAddress) { doc.text(qd.companyAddress, M, infoY); infoY += 4; }
@@ -545,7 +545,7 @@ export default function Quotes() {
     doc.setFontSize(8); doc.setFont(undefined, 'bold');
     doc.text('CLIENT', clientBoxX + 2, clientBoxY + 4);
     doc.setFont(undefined, 'normal'); doc.setFontSize(9);
-    doc.text(qd.clientName || '', clientBoxX + 2, clientBoxY + 9);
+    doc.text(qd.clientName, clientBoxX + 2, clientBoxY + 9);
     if (qd.clientAddress) doc.text(qd.clientAddress.substring(0, 50), clientBoxX + 2, clientBoxY + 13);
     if (qd.clientEmail) doc.text(qd.clientEmail, clientBoxX + 2, clientBoxY + 17);
 
@@ -579,7 +579,7 @@ export default function Quotes() {
       }
     });
 
-    let ty = doc.lastAutoTable.finalY + 8;
+    let ty = (doc as any).lastAutoTable.finalY + 8;
     const totalsX = W - M - 60;
     doc.setFontSize(8); doc.setFont(undefined, 'normal'); doc.setTextColor(0, 0, 0);
     
