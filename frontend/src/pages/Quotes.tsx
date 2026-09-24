@@ -488,7 +488,7 @@ export default function Quotes() {
 
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
-    const generatePDF = async (qd: Quote) => {
+  const generatePDF = async (qd: Quote) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
