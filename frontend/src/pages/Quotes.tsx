@@ -1,3 +1,4 @@
+import Sidebar from '../components/Sidebar';
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
@@ -6,8 +7,8 @@ import { usePermissions } from '../hooks/usePermissions';
 import { getFilePreviewUrl } from '../utils/storage';
 import { verifyDocumentAccess, logAuditAction } from '../utils/security';
 import {
-  Plus, Search, FileText, ChevronLeft, Download, Filter, Edit2, Copy, 
-  CheckCircle2, Receipt, X, Archive, RotateCcw, Hash, Send
+  Plus, Search, FileText, Download, Filter, Edit2, Copy, 
+  CheckCircle2, Receipt, X, Archive, RotateCcw, Hash, Send, Eye
 } from 'lucide-react';
 import { Query, ID as AppwriteID, Permission, Role } from 'appwrite';
 import { jsPDF } from 'jspdf';
@@ -42,12 +43,12 @@ interface CompanySettings {
 }
 
 const statusColors: Record<string, string> = {
-  Brouillon: 'bg-gray-100 text-gray-800', 
-  Envoyé: 'bg-blue-100 text-blue-800',
-  Accepté: 'bg-green-100 text-green-800', 
-  Refusé: 'bg-red-100 text-red-800',
-  Facturé: 'bg-purple-100 text-purple-800',
-  Archivé: 'bg-slate-100 text-slate-600'
+  Brouillon: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300', 
+  Envoyé: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
+  Accepté: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300', 
+  Refusé: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
+  Facturé: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
+  Archivé: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
 };
 
 const statusLabels: Record<string, string> = {
@@ -277,9 +278,7 @@ export default function Quotes() {
   const handleChooseFinal = async () => {
     if (!selectedQuoteForInvoice || !currentTeamId || !user || !user.$id) return;
     
-    console.log("🔍 DEBUG Quotes handleChooseFinal - secureTeamId:", user?.secureTeamId);
     setGenerating(true);
-    
     try {
       const quote = selectedQuoteForInvoice;
       const invoiceNumber = await getNextInvoiceNumber('FAC');
@@ -288,68 +287,36 @@ export default function Quotes() {
       const vatRate = parseFloat(companySettings?.defaultTvaRate || '20');
 
       const payload = {
-        invoiceNumber,
-        quoteId: quote.$id,
-        userId: user.$id,
-        teamId: currentTeamId,
-        type: 'standard',
-        originalQuoteId: quote.$id,
+        invoiceNumber, quoteId: quote.$id, userId: user.$id, teamId: currentTeamId,
+        type: 'standard', originalQuoteId: quote.$id,
         clientToken: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
-        status: 'draft',
-        issueDate: today,
-        dueDate: dueDate,
+        status: 'draft', issueDate: today, dueDate: dueDate,
         subtotal: Math.round((quote.subtotal || 0) * 100) / 100,
-        vatRate: Math.round(vatRate),
-        vatAmount: Math.round((quote.tax || 0) * 100) / 100,
-        total: Math.round((quote.total || 0) * 100) / 100,
-        discount: quote.discount || 0,
-        tax: Math.round((quote.tax || 0) * 100) / 100,
-        deposit: 0,
+        vatRate: Math.round(vatRate), vatAmount: Math.round((quote.tax || 0) * 100) / 100,
+        total: Math.round((quote.total || 0) * 100) / 100, discount: quote.discount || 0,
+        tax: Math.round((quote.tax || 0) * 100) / 100, deposit: 0,
         balance: Math.round((quote.total || 0) * 100) / 100,
-        companyName: quote.companyName || '',
-        companyLegalForm: quote.companyLegalForm || '',
-        companyAddress: quote.companyAddress || '',
-        companySiret: quote.companySiret || '',
-        companyRcs: quote.companyRcs || '',
-        companyTva: quote.companyTva || '',
-        companyPhone: quote.companyPhone || '',
-        companyEmail: quote.companyEmail || '',
-        logoFileId: quote.logoFileId || '',
-        clientName: quote.clientName || '',
-        clientAddress: quote.clientAddress || '',
-        clientBillingAddress: quote.clientBillingAddress || '',
-        clientEmail: quote.clientEmail || '',
-        clientPhone: quote.clientPhone || '',
-        items: quote.items || '[]',
-        paymentMethods: quote.paymentMethods || '',
-        paymentConditions: quote.paymentConditions || '',
-        executionDelay: quote.executionDelay || '',
-        specialConditions: '',
-        tradeType: quote.tradeType || '',
-        insuranceName: quote.insuranceName || '',
-        insuranceAddress: quote.insuranceAddress || '',
+        companyName: quote.companyName || '', companyLegalForm: quote.companyLegalForm || '',
+        companyAddress: quote.companyAddress || '', companySiret: quote.companySiret || '',
+        companyRcs: quote.companyRcs || '', companyTva: quote.companyTva || '',
+        companyPhone: quote.companyPhone || '', companyEmail: quote.companyEmail || '',
+        logoFileId: quote.logoFileId || '', clientName: quote.clientName || '',
+        clientAddress: quote.clientAddress || '', clientBillingAddress: quote.clientBillingAddress || '',
+        clientEmail: quote.clientEmail || '', clientPhone: quote.clientPhone || '',
+        items: quote.items || '[]', paymentMethods: quote.paymentMethods || '',
+        paymentConditions: quote.paymentConditions || '', executionDelay: quote.executionDelay || '',
+        specialConditions: '', tradeType: quote.tradeType || '',
+        insuranceName: quote.insuranceName || '', insuranceAddress: quote.insuranceAddress || '',
         insurancePolicy: quote.insurancePolicy || '',
         notes: `Facture finale générée depuis le devis ${quote.quoteNumber}`
       };
 
       let perms: string[] = [];
       if (user?.secureTeamId) {
-        console.log("✅ Quotes: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ Quotes: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
-
-      console.log("🚀 Quotes handleChooseFinal: Envoi avec permissions:", perms);
 
       await databases.createDocument(DATABASE_ID, 'invoices', AppwriteID.unique(), payload, perms);
       
@@ -380,7 +347,6 @@ export default function Quotes() {
       return;
     }
 
-    console.log("🔍 DEBUG Quotes handleGenerateAdvanceInvoice - secureTeamId:", user?.secureTeamId);
     setGenerating(true);
     try {
       const quote = selectedQuoteForInvoice;
@@ -393,52 +359,27 @@ export default function Quotes() {
       const advanceTVA = Math.round((quote.tax || 0) * ratio * 100) / 100;
 
       const payload = {
-        invoiceNumber,
-        quoteId: quote.$id,
-        userId: user.$id,
-        teamId: currentTeamId,
-        type: 'advance',
-        originalQuoteId: quote.$id,
+        invoiceNumber, quoteId: quote.$id, userId: user.$id, teamId: currentTeamId,
+        type: 'advance', originalQuoteId: quote.$id,
         advancePercent: ((amount / (quote.total || 0)) * 100).toFixed(2),
         clientToken: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
-        status: 'draft',
-        issueDate: today,
-        dueDate: dueDate,
-        subtotal: advanceHT,
-        vatRate: parseFloat(companySettings?.defaultTvaRate || '20'),
-        vatAmount: advanceTVA,
-        total: amount,
-        discount: 0,
-        tax: advanceTVA,
-        deposit: 0,
-        balance: amount,
-        companyName: quote.companyName || '',
-        companyLegalForm: quote.companyLegalForm || '',
-        companyAddress: quote.companyAddress || '',
-        companySiret: quote.companySiret || '',
-        companyRcs: quote.companyRcs || '',
-        companyTva: quote.companyTva || '',
-        companyPhone: quote.companyPhone || '',
-        companyEmail: quote.companyEmail || '',
-        logoFileId: quote.logoFileId || '',
-        clientName: quote.clientName || '',
-        clientAddress: quote.clientAddress || '',
-        clientBillingAddress: quote.clientBillingAddress || '',
-        clientEmail: quote.clientEmail || '',
-        clientPhone: quote.clientPhone || '',
+        status: 'draft', issueDate: today, dueDate: dueDate,
+        subtotal: advanceHT, vatRate: parseFloat(companySettings?.defaultTvaRate || '20'),
+        vatAmount: advanceTVA, total: amount, discount: 0, tax: advanceTVA, deposit: 0, balance: amount,
+        companyName: quote.companyName || '', companyLegalForm: quote.companyLegalForm || '',
+        companyAddress: quote.companyAddress || '', companySiret: quote.companySiret || '',
+        companyRcs: quote.companyRcs || '', companyTva: quote.companyTva || '',
+        companyPhone: quote.companyPhone || '', companyEmail: quote.companyEmail || '',
+        logoFileId: quote.logoFileId || '', clientName: quote.clientName || '',
+        clientAddress: quote.clientAddress || '', clientBillingAddress: quote.clientBillingAddress || '',
+        clientEmail: quote.clientEmail || '', clientPhone: quote.clientPhone || '',
         items: JSON.stringify([{
-          id: `advance-${Date.now()}`,
-          reference: 'ACOMPTE',
-          description: `Acompte sur devis ${quote.quoteNumber}`,
-          quantity: 1,
-          unit: 'forfait',
-          unitPrice: advanceHT,
-          tvaRate: parseFloat(companySettings?.defaultTvaRate || '20'),
-          total: advanceHT,
-          discount: 0
+          id: `advance-${Date.now()}`, reference: 'ACOMPTE',
+          description: `Acompte sur devis ${quote.quoteNumber}`, quantity: 1, unit: 'forfait',
+          unitPrice: advanceHT, tvaRate: parseFloat(companySettings?.defaultTvaRate || '20'),
+          total: advanceHT, discount: 0
         }]),
-        paymentMethods: quote.paymentMethods || '',
-        paymentConditions: quote.paymentConditions || '',
+        paymentMethods: quote.paymentMethods || '', paymentConditions: quote.paymentConditions || '',
         executionDelay: quote.executionDelay || '',
         specialConditions: `Facture d'acompte - Référence devis : ${quote.quoteNumber}`,
         notes: `Acompte sur devis ${quote.quoteNumber}`
@@ -446,22 +387,10 @@ export default function Quotes() {
 
       let perms: string[] = [];
       if (user?.secureTeamId) {
-        console.log("✅ Quotes: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ Quotes: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
-
-      console.log("🚀 Quotes handleGenerateAdvanceInvoice: Envoi avec permissions:", perms);
 
       await databases.createDocument(DATABASE_ID, 'invoices', AppwriteID.unique(), payload, perms);
 
@@ -488,14 +417,12 @@ export default function Quotes() {
 
   const handleSaveModal = async () => { handleCloseModal(); await loadData(); };
 
-  // ✅ SOLUTION FINALE : @ts-ignore sur chaque appel problématique
-    const generatePDF = async (qd: Quote) => {
+  const generatePDF = async (qd: Quote) => {
     const doc = new jsPDF({ unit: 'mm', format: 'a4' });
     const W = 210, M = 20;
     let items: QuoteItem[] = []; 
     try { items = JSON.parse(qd.items || '[]'); } catch(e) {}
     
-    // ✅ CRÉATION DE VARIABLES LOCALES GARANTIES
     const companyName: string = String(qd.companyName || '');
     const companyAddress: string = String(qd.companyAddress || '');
     const companyPhone: string = String(qd.companyPhone || '');
@@ -587,7 +514,7 @@ export default function Quotes() {
       startY: Y,
       head: [['Réf.', 'Désignation', 'Qté', 'Unité', 'Prix U HT', 'Remise', 'Total HT', 'TVA']],
       body: tableData, theme: 'grid', margin: { left: M, right: M },
-      headStyles: { fillColor: [37, 99, 235], textColor: 255, fontSize: 8, fontStyle: 'bold' },
+      headStyles: { fillColor: [147, 51, 234], textColor: 255, fontSize: 8, fontStyle: 'bold' },
       styles: { fontSize: 8, cellPadding: 2, lineColor: [200, 200, 200], lineWidth: 0.2 },
       columnStyles: {
         0: { cellWidth: 15, fontStyle: 'normal' }, 1: { cellWidth: 60 },
@@ -624,7 +551,7 @@ export default function Quotes() {
     
     if (pdfDeposit > 0) {
       totalLine('Acompte', `- ${pdfDeposit.toFixed(2)} €`);
-      doc.setTextColor(37, 99, 235); doc.setFont(undefined, 'bold');
+      doc.setTextColor(147, 51, 234); doc.setFont(undefined, 'bold');
       doc.text('NET À PAYER', totalsX, ty);
       doc.text(`${pdfBalance.toFixed(2)} €`, W - M, ty, { align: 'right' });
       ty += 6;
@@ -663,328 +590,344 @@ export default function Quotes() {
   const fm = (a: number) => `${a.toFixed(2)} €`;
   const formatDate = (dateStr?: string) => dateStr ? new Date(dateStr).toLocaleDateString('fr-FR') : '-';
 
-  if (permLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50">Vérification des droits...</div>;
+  if (permLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
   if (!hasPermission('quotes.view')) return null;
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center gap-4">
-            <button onClick={() => navigate('/dashboard')} className="text-slate-400 hover:text-slate-600"><ChevronLeft size={24} /></button>
-            <div>
-              <h1 className="text-2xl font-bold flex items-center gap-2"><FileText className="text-green-600" />Devis</h1>
-              <p className="text-sm text-slate-500">{filtered.length} devis {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}</p>
-            </div>
-          </div>
-          {viewMode === 'active' && hasPermission('quotes.create') && (
-            <button onClick={handleOpenAdd} className="bg-green-600 text-white px-4 py-2.5 rounded-lg text-sm font-medium hover:bg-green-700 flex items-center gap-2">
-              <Plus size={16} /> Nouveau devis
-            </button>
-          )}
-        </div>
-      </header>
-      
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex border-b border-slate-200 mb-6">
-          <button 
-            onClick={() => setViewMode('active')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-          >
-            Actifs ({quotes.filter(q => q.status !== 'Archivé').length})
-          </button>
-          <button 
-            onClick={() => setViewMode('archived')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-green-600 text-green-600' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
-          >
-            Archivés ({quotes.filter(q => q.status === 'Archivé').length})
-          </button>
-        </div>
-
-        <div className="flex gap-4 mb-6">
-          <div className="relative flex-1">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input 
-              placeholder="Rechercher (N°, client, objet...)" 
-              value={search} 
-              onChange={e => setSearch(e.target.value)} 
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-sm"
-            />
-          </div>
-          {viewMode === 'active' && (
-            <div className="relative">
-              <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select 
-                value={filterStatus} 
-                onChange={e => setFilterStatus(e.target.value)} 
-                className="pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-green-500 outline-none text-sm bg-white"
-              >
-                <option value="all">Tous les statuts</option>
-                {Object.entries(statusLabels).filter(([k]) => k !== 'Archivé').map(([k, l]) => (
-                  <option key={k} value={k}>{l}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-        
-        {loading ? <div className="text-center py-12 text-slate-500">Chargement...</div> : filtered.length === 0 ? (
-          <div className="bg-white rounded-lg shadow p-12 text-center">
-            <FileText size={48} className="mx-auto text-slate-300 mb-4" />
-            <h3 className="font-semibold text-slate-700">Aucun devis {viewMode === 'active' ? 'actif' : 'archivé'}</h3>
-          </div>
-        ) : (
-          <div className="bg-white rounded-lg shadow overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
-                <thead className="bg-slate-50 border-b">
-                  <tr>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">N° Devis</th>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Client</th>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Objet</th>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Date</th>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Total TTC</th>
-                    <th className="p-4 text-xs font-semibold text-slate-500 uppercase">Statut</th>
-                    <th className="p-4 text-right text-xs font-semibold text-slate-500 uppercase">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filtered.map(q => (
-                    <tr key={q.$id} className="hover:bg-slate-50 transition-colors">
-                      <td className="p-4">
-                        <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-green-700 bg-green-50 px-2 py-1 rounded">
-                          <Hash size={12} />
-                          {q.quoteNumber}
-                        </span>
-                      </td>
-                      <td className="p-4 text-sm font-medium text-slate-900">{q.clientName || '-'}</td>
-                      <td className="p-4 text-sm text-slate-600">{q.subject || '-'}</td>
-                      <td className="p-4 text-sm text-slate-600">{formatDate(q.issueDate)}</td>
-                      <td className="p-4 text-sm font-semibold text-slate-900">{fm(q.total)}</td>
-                      <td className="p-4">
-                        <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[q.status] || 'bg-gray-100 text-gray-800'}`}>
-                          {statusLabels[q.status] || q.status}
-                        </span>
-                      </td>
-                      <td className="p-4 text-right">
-                        <div className="flex justify-end gap-1">
-                          {viewMode === 'active' ? (
-                            <>
-                              {hasPermission('quotes.send') && (
-                                <button onClick={() => handleCopyLink(q)} className={`p-2 rounded-lg transition-colors ${copiedToken === q.clientToken ? 'text-green-600 bg-green-50' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50'}`} title="Copier le lien">
-                                  {copiedToken === q.clientToken ? <CheckCircle2 size={16} /> : <Copy size={16} />}
-                                </button>
-                              )}
-                              
-                              {hasPermission('invoices.create') && q.status === 'Accepté' && !hasInvoiceForQuote(q.$id) && (
-                                <button 
-                                  onClick={() => handleOpenChoiceModal(q)} 
-                                  className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 rounded-lg transition-colors" 
-                                  title="Générer une facture (acompte ou finale)"
-                                >
-                                  <Send size={16} />
-                                </button>
-                              )}
-
-                              {hasPermission('quotes.edit') && (q.status === 'Brouillon' || q.status === 'Refusé' || q.status === 'Envoyé') && (
-                                <button onClick={() => handleEditQuote(q)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-lg" title="Modifier">
-                                  <Edit2 size={16} />
-                                </button>
-                              )}
-                              <button onClick={() => generatePDF(q)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg" title="Télécharger PDF">
-                                <Download size={16} />
-                              </button>
-                              {hasPermission('quotes.delete') && (
-                                <button onClick={() => handleArchive(q.$id, q.quoteNumber)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg" title="Archiver">
-                                  <Archive size={16} />
-                                </button>
-                              )}
-                            </>
-                          ) : (
-                            <button onClick={() => handleUnarchive(q.$id, q.quoteNumber)} className="inline-flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
-                              <RotateCcw size={14} /><span>Désarchiver</span>
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-      </main>
-
-      <QuoteModal
-        isOpen={showModal}
-        onClose={handleCloseModal}
-        onSave={handleSaveModal}
-        clients={clients}
-        companySettings={companySettings}
-        editingQuote={editingQuote}
-        preselectedClientId={preselectedClientId}
-        getNextQuoteNumber={getNextQuoteNumber}
-        currentTeamId={currentTeamId}
-        userPermissions={permissions}
-      />
-
-      {showChoiceModal && selectedQuoteForInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg border border-slate-100">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <Send className="text-purple-600" size={22} />
-                Générer une facture
-              </h2>
-              <button onClick={() => { setShowChoiceModal(false); setSelectedQuoteForInvoice(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} className="text-slate-500" />
-              </button>
-            </div>
-            
-            <div className="p-6">
-              <div className="bg-purple-50 border border-purple-200 rounded-xl p-4 mb-5">
-                <div className="grid grid-cols-2 gap-3 text-sm">
-                  <div>
-                    <p className="text-xs text-purple-700 font-semibold uppercase">Devis</p>
-                    <p className="font-bold text-slate-900">{selectedQuoteForInvoice.quoteNumber}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-purple-700 font-semibold uppercase">Client</p>
-                    <p className="font-semibold text-slate-900">{selectedQuoteForInvoice.clientName}</p>
-                  </div>
-                  <div className="col-span-2">
-                    <p className="text-xs text-purple-700 font-semibold uppercase">Montant total</p>
-                    <p className="text-2xl font-bold text-purple-700">{fm(selectedQuoteForInvoice.total || 0)}</p>
-                  </div>
+    <Sidebar>
+      <div className="min-h-full bg-slate-50 dark:bg-slate-900">
+        {/* HEADER STICKY */}
+        <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <FileText size={24} className="text-purple-600" />
+                    Devis
+                  </h1>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">{filtered.length} devis {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}</p>
                 </div>
               </div>
-              
-              <p className="text-sm text-slate-600 mb-4 font-medium">
-                Choisissez le type de facture à générer :
-              </p>
-              
-              <div className="space-y-3">
-                <button
-                  onClick={handleChooseAdvance}
-                  className="w-full text-left p-4 border-2 border-blue-200 rounded-xl hover:bg-blue-50 hover:border-blue-400 transition-all group"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="w-11 h-11 bg-blue-100 group-hover:bg-blue-200 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
-                      <FileText size={20} className="text-blue-600" />
+              {viewMode === 'active' && hasPermission('quotes.create') && (
+                <button onClick={handleOpenAdd} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm shadow-sm active:scale-95">
+                  <Plus size={18} /><span>Nouveau devis</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </header>
+        
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* ONGLETS */}
+          <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
+            <button onClick={() => setViewMode('active')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              Actifs ({quotes.filter(q => q.status !== 'Archivé').length})
+            </button>
+            <button onClick={() => setViewMode('archived')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              Archivés ({quotes.filter(q => q.status === 'Archivé').length})
+            </button>
+          </div>
+
+          {/* BARRE DE RECHERCHE ET FILTRES */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input placeholder="Rechercher (N°, client, objet...)" value={search} onChange={e => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm transition-shadow" />
+            </div>
+            {viewMode === 'active' && (
+              <div className="relative sm:w-64">
+                <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none">
+                  <option value="all">Tous les statuts</option>
+                  {Object.entries(statusLabels).filter(([k]) => k !== 'Archivé').map(([k, l]) => (<option key={k} value={k}>{l}</option>))}
+                </select>
+              </div>
+            )}
+          </div>
+          
+          {/* CONTENU : TABLEAU DESKTOP / CARTES MOBILE */}
+          {loading ? (
+            <div className="text-center py-12 text-slate-500 dark:text-slate-400 animate-pulse">Chargement...</div>
+          ) : filtered.length === 0 ? (
+            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center shadow-sm">
+              <FileText size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+              <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Aucun devis {viewMode === 'active' ? 'actif' : 'archivé'}</h3>
+            </div>
+          ) : (
+            <>
+              {/* VERSION DESKTOP (Tableau) */}
+              <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left">
+                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                      <tr>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">N° Devis</th>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Client</th>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Objet</th>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Date</th>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Total TTC</th>
+                        <th className="p-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statut</th>
+                        <th className="p-4 text-right text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                      {filtered.map(q => (
+                        <tr key={q.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                          <td className="p-4">
+                            <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded">
+                              <Hash size={12} /> {q.quoteNumber}
+                            </span>
+                          </td>
+                          <td className="p-4 text-sm font-medium text-slate-900 dark:text-white">{q.clientName || '-'}</td>
+                          <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{q.subject || '-'}</td>
+                          <td className="p-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(q.issueDate)}</td>
+                          <td className="p-4 text-sm font-semibold text-slate-900 dark:text-white">{fm(q.total)}</td>
+                          <td className="p-4">
+                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[q.status] || 'bg-gray-100 text-gray-800'}`}>
+                              {statusLabels[q.status] || q.status}
+                            </span>
+                          </td>
+                          <td className="p-4 text-right">
+                            <div className="flex justify-end gap-1">
+                              {viewMode === 'active' ? (
+                                <>
+                                  {hasPermission('quotes.send') && (
+                                    <button onClick={() => handleCopyLink(q)} className={`p-2 rounded-lg transition-colors ${copiedToken === q.clientToken ? 'text-purple-600 bg-purple-50 dark:bg-purple-900/30' : 'text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30'}`} title="Copier le lien">
+                                      {copiedToken === q.clientToken ? <CheckCircle2 size={16} /> : <Copy size={16} />}
+                                    </button>
+                                  )}
+                                  {hasPermission('invoices.create') && q.status === 'Accepté' && !hasInvoiceForQuote(q.$id) && (
+                                    <button onClick={() => handleOpenChoiceModal(q)} className="p-2 text-purple-500 hover:text-purple-700 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Générer une facture">
+                                      <Send size={16} />
+                                    </button>
+                                  )}
+                                  {hasPermission('quotes.edit') && (q.status === 'Brouillon' || q.status === 'Refusé' || q.status === 'Envoyé') && (
+                                    <button onClick={() => handleEditQuote(q)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg" title="Modifier">
+                                      <Edit2 size={16} />
+                                    </button>
+                                  )}
+                                  <button onClick={() => generatePDF(q)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg" title="Télécharger PDF">
+                                    <Download size={16} />
+                                  </button>
+                                  {hasPermission('quotes.delete') && (
+                                    <button onClick={() => handleArchive(q.$id, q.quoteNumber)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg" title="Archiver">
+                                      <Archive size={16} />
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <button onClick={() => handleUnarchive(q.$id, q.quoteNumber)} className="inline-flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors">
+                                  <RotateCcw size={14} /><span>Désarchiver</span>
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* VERSION MOBILE (Cartes) */}
+              <div className="md:hidden space-y-4">
+                {filtered.map(q => (
+                  <div key={q.$id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
+                    <div className="flex justify-between items-start mb-3">
+                      <div>
+                        <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded mb-1">
+                          <Hash size={12} /> {q.quoteNumber}
+                        </span>
+                        <h3 className="font-semibold text-slate-900 dark:text-white">{q.clientName || 'Client inconnu'}</h3>
+                        <p className="text-sm text-slate-500 dark:text-slate-400 truncate">{q.subject || 'Sans objet'}</p>
+                      </div>
+                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[q.status]}`}>
+                        {statusLabels[q.status]}
+                      </span>
                     </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-slate-900">Facture d'acompte</h3>
-                      <p className="text-sm text-slate-600 mt-1">
-                        Pour les chantiers longs. Demandez un acompte au client avant de commencer les travaux.
-                      </p>
-                      {(selectedQuoteForInvoice.deposit || 0) > 0 && (
-                        <p className="text-xs text-blue-600 mt-2 font-medium">
-                          💡 Acompte suggéré : {fm(selectedQuoteForInvoice.deposit || 0)}
-                        </p>
+                    
+                    <div className="flex justify-between items-center py-3 border-t border-b border-slate-100 dark:border-slate-700 mb-3">
+                      <span className="text-sm text-slate-500 dark:text-slate-400">{formatDate(q.issueDate)}</span>
+                      <span className="text-lg font-bold text-slate-900 dark:text-white">{fm(q.total)}</span>
+                    </div>
+
+                    <div className="grid grid-cols-4 gap-2">
+                      {viewMode === 'active' ? (
+                        <>
+                          <button onClick={() => generatePDF(q)} className="flex flex-col items-center justify-center p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-lg active:scale-95 transition-transform">
+                            <Download size={18} />
+                            <span className="text-[10px] mt-1 font-medium">PDF</span>
+                          </button>
+                          {hasPermission('quotes.edit') && (q.status === 'Brouillon' || q.status === 'Refusé' || q.status === 'Envoyé') && (
+                            <button onClick={() => handleEditQuote(q)} className="flex flex-col items-center justify-center p-2 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
+                              <Edit2 size={18} />
+                              <span className="text-[10px] mt-1 font-medium">Modifier</span>
+                            </button>
+                          )}
+                          {hasPermission('invoices.create') && q.status === 'Accepté' && !hasInvoiceForQuote(q.$id) && (
+                            <button onClick={() => handleOpenChoiceModal(q)} className="flex flex-col items-center justify-center p-2 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
+                              <Send size={18} />
+                              <span className="text-[10px] mt-1 font-medium">Facture</span>
+                            </button>
+                          )}
+                          {hasPermission('quotes.delete') && (
+                            <button onClick={() => handleArchive(q.$id, q.quoteNumber)} className="flex flex-col items-center justify-center p-2 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">
+                              <Archive size={18} />
+                              <span className="text-[10px] mt-1 font-medium">Archiver</span>
+                            </button>
+                          )}
+                        </>
+                      ) : (
+                        <button onClick={() => handleUnarchive(q.$id, q.quoteNumber)} className="col-span-4 flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
+                          <RotateCcw size={16} /><span>Désarchiver</span>
+                        </button>
                       )}
                     </div>
                   </div>
-                </button>
-                
-                <button
-                  onClick={handleChooseFinal}
-                  disabled={generating}
-                  className="w-full text-left p-4 border-2 border-purple-200 rounded-xl hover:bg-purple-50 hover:border-purple-400 transition-all group disabled:opacity-50"
-                >
-                  <div className="flex items-start gap-3">
-                    <div className="w-11 h-11 bg-purple-100 group-hover:bg-purple-200 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
-                      <Receipt size={20} className="text-purple-600" />
-                    </div>
-                    <div className="flex-1">
-                      <h3 className="font-bold text-slate-900">
-                        {generating ? 'Génération en cours...' : 'Facture finale'}
-                      </h3>
-                      <p className="text-sm text-slate-600 mt-1">
-                        Travaux terminés. Générez directement la facture pour le montant total.
-                      </p>
-                    </div>
-                  </div>
-                </button>
+                ))}
               </div>
-            </div>
-            
-            <div className="flex justify-end px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
-              <button 
-                onClick={() => { setShowChoiceModal(false); setSelectedQuoteForInvoice(null); }} 
-                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-              >
-                Annuler
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+            </>
+          )}
+        </main>
 
-      {showAdvanceModal && selectedQuoteForInvoice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md border border-slate-100">
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100">
-              <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
-                <FileText className="text-blue-600" size={22} />
-                Facture d'acompte
-              </h2>
-              <button onClick={() => { setShowAdvanceModal(false); setSelectedQuoteForInvoice(null); }} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} className="text-slate-500" />
-              </button>
-            </div>
-            
-            <div className="p-6 space-y-4">
-              <div className="bg-blue-50 border border-blue-200 rounded-xl p-3">
-                <p className="text-sm text-blue-900">
-                  <strong>Rappel légal :</strong> Selon l'article 289 nonies du CGI, tout acompte encaissé doit faire l'objet d'une facture d'acompte distincte.
-                </p>
+        <QuoteModal
+          isOpen={showModal}
+          onClose={handleCloseModal}
+          onSave={handleSaveModal}
+          clients={clients}
+          companySettings={companySettings}
+          editingQuote={editingQuote}
+          preselectedClientId={preselectedClientId}
+          getNextQuoteNumber={getNextQuoteNumber}
+          currentTeamId={currentTeamId}
+          userPermissions={permissions}
+        />
+
+        {/* MODAL DE CHOIX (Acompte / Finale) - OPTIMISÉ MOBILE */}
+        {showChoiceModal && selectedQuoteForInvoice && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg border border-slate-100 dark:border-slate-700 animate-slideUp">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Send className="text-purple-600" size={22} />
+                  Générer une facture
+                </h2>
+                <button onClick={() => { setShowChoiceModal(false); setSelectedQuoteForInvoice(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X size={20} className="text-slate-500 dark:text-slate-400" />
+                </button>
               </div>
               
-              <div>
-                <label className="block text-sm font-semibold text-slate-700 mb-2">
-                  Montant de l'acompte (€) *
-                </label>
-                <input 
-                  type="number" 
-                  min="0.01"
-                  step="0.01"
-                  max={(selectedQuoteForInvoice.total || 0) - 0.01}
-                  value={advanceForm.amount} 
-                  onChange={e => setAdvanceForm({ ...advanceForm, amount: e.target.value })} 
-                  className="w-full px-4 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 outline-none text-lg font-semibold"
-                  placeholder="0.00"
-                  autoFocus
-                />
-                <p className="text-xs text-slate-500 mt-2">
-                  Total du devis : {fm(selectedQuoteForInvoice.total || 0)} • 
-                  Reste après acompte : {fm((selectedQuoteForInvoice.total || 0) - (parseFloat(advanceForm.amount) || 0))}
-                </p>
+              <div className="p-6">
+                <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 mb-5">
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div>
+                      <p className="text-xs text-purple-700 dark:text-purple-300 font-semibold uppercase">Devis</p>
+                      <p className="font-bold text-slate-900 dark:text-white">{selectedQuoteForInvoice.quoteNumber}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-purple-700 dark:text-purple-300 font-semibold uppercase">Client</p>
+                      <p className="font-semibold text-slate-900 dark:text-white">{selectedQuoteForInvoice.clientName}</p>
+                    </div>
+                    <div className="col-span-2">
+                      <p className="text-xs text-purple-700 dark:text-purple-300 font-semibold uppercase">Montant total</p>
+                      <p className="text-2xl font-bold text-purple-700 dark:text-purple-300">{fm(selectedQuoteForInvoice.total || 0)}</p>
+                    </div>
+                  </div>
+                </div>
+                
+                <p className="text-sm text-slate-600 dark:text-slate-400 mb-4 font-medium">Choisissez le type de facture à générer :</p>
+                
+                <div className="space-y-3">
+                  <button onClick={handleChooseAdvance} className="w-full text-left p-4 border-2 border-blue-200 dark:border-blue-800 rounded-xl hover:bg-blue-50 dark:hover:bg-blue-900/20 hover:border-blue-400 transition-all group">
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 bg-blue-100 dark:bg-blue-900/40 group-hover:bg-blue-200 dark:group-hover:bg-blue-800 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
+                        <FileText size={20} className="text-blue-600 dark:text-blue-400" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-slate-900 dark:text-white">Facture d'acompte</h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Pour les chantiers longs. Demandez un acompte au client avant de commencer.</p>
+                        {(selectedQuoteForInvoice.deposit || 0) > 0 && (
+                          <p className="text-xs text-blue-600 dark:text-blue-400 mt-2 font-medium">💡 Acompte suggéré : {fm(selectedQuoteForInvoice.deposit || 0)}</p>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                  
+                  <button onClick={handleChooseFinal} disabled={generating} className="w-full text-left p-4 border-2 border-purple-200 dark:border-purple-800 rounded-xl hover:bg-purple-50 dark:hover:bg-purple-900/20 hover:border-purple-400 transition-all group disabled:opacity-50">
+                    <div className="flex items-start gap-3">
+                      <div className="w-11 h-11 bg-purple-100 dark:bg-purple-900/40 group-hover:bg-purple-200 dark:group-hover:bg-purple-800 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors">
+                        <Receipt size={20} className="text-purple-600 dark:text-purple-400" />
+                      </div>
+                      <div className="flex-1">
+                        <h3 className="font-bold text-slate-900 dark:text-white">{generating ? 'Génération en cours...' : 'Facture finale'}</h3>
+                        <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">Travaux terminés. Générez directement la facture pour le montant total.</p>
+                      </div>
+                    </div>
+                  </button>
+                </div>
+              </div>
+              
+              <div className="flex justify-end px-6 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 rounded-b-2xl">
+                <button onClick={() => { setShowChoiceModal(false); setSelectedQuoteForInvoice(null); }} className="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                  Annuler
+                </button>
               </div>
             </div>
-            
-            <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 bg-slate-50 rounded-b-2xl">
-              <button 
-                onClick={() => setShowAdvanceModal(false)} 
-                className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-              >
-                Annuler
-              </button>
-              <button 
-                onClick={handleGenerateAdvanceInvoice} 
-                disabled={generating || !advanceForm.amount || parseFloat(advanceForm.amount) <= 0}
-                className="px-5 py-2.5 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-              >
-                {generating ? (
-                  <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Génération...</>
-                ) : (
-                  <><FileText size={16} /> Générer l'acompte</>
-                )}
-              </button>
+          </div>
+        )}
+
+        {/* MODAL ACOMPTE - OPTIMISÉ MOBILE */}
+        {showAdvanceModal && selectedQuoteForInvoice && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md border border-slate-100 dark:border-slate-700 animate-slideUp">
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-slate-700">
+                <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <FileText className="text-blue-600" size={22} />
+                  Facture d'acompte
+                </h2>
+                <button onClick={() => { setShowAdvanceModal(false); setSelectedQuoteForInvoice(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X size={20} className="text-slate-500 dark:text-slate-400" />
+                </button>
+              </div>
+              
+              <div className="p-6 space-y-4">
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-xl p-3">
+                  <p className="text-sm text-blue-900 dark:text-blue-200">
+                    <strong>Rappel légal :</strong> Selon l'article 289 nonies du CGI, tout acompte encaissé doit faire l'objet d'une facture d'acompte distincte.
+                  </p>
+                </div>
+                
+                <div>
+                  <label className="block text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">Montant de l'acompte (€) *</label>
+                  <input 
+                    type="number" min="0.01" step="0.01" max={(selectedQuoteForInvoice.total || 0) - 0.01}
+                    value={advanceForm.amount} onChange={e => setAdvanceForm({ ...advanceForm, amount: e.target.value })} 
+                    className="w-full px-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-lg font-semibold"
+                    placeholder="0.00" autoFocus
+                  />
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                    Total du devis : {fm(selectedQuoteForInvoice.total || 0)} • Reste après acompte : {fm((selectedQuoteForInvoice.total || 0) - (parseFloat(advanceForm.amount) || 0))}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex justify-end gap-3 px-6 py-4 border-t border-slate-100 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 rounded-b-2xl">
+                <button onClick={() => setShowAdvanceModal(false)} className="px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                  Annuler
+                </button>
+                <button onClick={handleGenerateAdvanceInvoice} disabled={generating || !advanceForm.amount || parseFloat(advanceForm.amount) <= 0} className="px-5 py-3 text-sm font-bold text-white bg-blue-600 rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 active:scale-95 transition-all">
+                  {generating ? (
+                    <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Génération...</>
+                  ) : (
+                    <><FileText size={16} /> Générer l'acompte</>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </Sidebar>
   );
 }

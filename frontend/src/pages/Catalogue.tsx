@@ -3,10 +3,11 @@ import { useNavigate } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
+import Sidebar from '../components/Sidebar';
 import Papa from 'papaparse';
 import * as XLSX from 'xlsx';
 import {
-  Plus, Search, Edit2, X, Package, ChevronLeft, Filter, Archive, RotateCcw, Tag, Hash, DollarSign, Percent, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Download
+  Plus, Search, Edit2, X, Package, Filter, Archive, RotateCcw, Tag, Hash, DollarSign, Percent, Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Download
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 
@@ -55,8 +56,8 @@ const statusLabels: Record<string, string> = {
 };
 
 const statusColors: Record<string, string> = {
-  active: 'bg-green-100 text-green-800',
-  archived: 'bg-slate-100 text-slate-600'
+  active: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
+  archived: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
 };
 
 const unitOptions = ['Forfait', 'Heure', 'Jour', 'm²', 'ml', 'Unité', 'kg', 'Intervention'];
@@ -110,9 +111,6 @@ export default function Catalogue() {
 
   useEffect(() => {
     if (!user) { navigate('/login'); return; }
-    
-    console.log("🔍 DEBUG Catalogue - secureTeamId:", user?.secureTeamId);
-    
     loadData();
   }, [user]);
 
@@ -347,25 +345,19 @@ export default function Catalogue() {
 
     if (!confirm(`Importer ${validProducts.length} produit(s) ?`)) return;
 
-    console.log("🔍 DEBUG Catalogue handleConfirmImport - secureTeamId:", user?.secureTeamId);
-
     setImporting(true);
     setImportStep('importing');
     let successCount = 0;
     let failCount = 0;
 
-    // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
     let perms: string[] = [];
-    
     if (user?.secureTeamId) {
-      console.log("✅ Catalogue handleConfirmImport: Utilisation de la sécurité maximale (secureTeamId)");
       perms = [
         Permission.read(Role.team(user.secureTeamId)),
         Permission.update(Role.team(user.secureTeamId)),
         Permission.delete(Role.team(user.secureTeamId))
       ];
     } else {
-      console.warn("⚠️ Catalogue handleConfirmImport: secureTeamId manquant, fallback Role.users()");
       perms = [
         Permission.read(Role.users()),
         Permission.update(Role.users()),
@@ -447,10 +439,7 @@ export default function Catalogue() {
   };
 
   const handleOpenEditCategory = (cat: Category) => {
-    if (cat.teamId !== currentTeamId) {
-      alert('⚠️ Accès refusé');
-      return;
-    }
+    if (cat.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
     setEditingCategoryId(cat.$id);
     setCategoryForm({ name: cat.name || '', description: cat.description || '', status: cat.status || 'active' });
     setShowCategoryModal(true);
@@ -460,29 +449,15 @@ export default function Catalogue() {
     if (!categoryForm.name.trim()) { alert('Veuillez saisir un nom.'); return; }
     if (!currentTeamId) return;
 
-    console.log("🔍 DEBUG Catalogue handleSaveCategory - secureTeamId:", user?.secureTeamId);
-
     setSavingCategory(true);
     try {
       const data = { ...categoryForm, teamId: currentTeamId };
-      
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
       
       if (user?.secureTeamId) {
-        console.log("✅ Catalogue handleSaveCategory: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ Catalogue handleSaveCategory: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
 
       if (editingCategoryId) {
@@ -544,29 +519,15 @@ export default function Catalogue() {
     if (!productForm.unitPrice || parseFloat(productForm.unitPrice) < 0) { alert('Prix invalide.'); return; }
     if (!currentTeamId) return;
 
-    console.log("🔍 DEBUG Catalogue handleSaveProduct - secureTeamId:", user?.secureTeamId);
-
     setSavingProduct(true);
     try {
       const data = { ...productForm, teamId: currentTeamId };
-      
-      // ✅ SÉCURITÉ MAXIMALE : Utilisation du secureTeamId avec fallback
       let perms: string[] = [];
       
       if (user?.secureTeamId) {
-        console.log("✅ Catalogue handleSaveProduct: Utilisation de la sécurité maximale (secureTeamId)");
-        perms = [
-          Permission.read(Role.team(user.secureTeamId)),
-          Permission.update(Role.team(user.secureTeamId)),
-          Permission.delete(Role.team(user.secureTeamId))
-        ];
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
       } else {
-        console.warn("⚠️ Catalogue handleSaveProduct: secureTeamId manquant, fallback Role.users()");
-        perms = [
-          Permission.read(Role.users()),
-          Permission.update(Role.users()),
-          Permission.delete(Role.users())
-        ];
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
       }
 
       if (editingProductId) {
@@ -623,637 +584,698 @@ export default function Catalogue() {
     return isNaN(num) ? '0,00 €' : `${num.toFixed(2)} €`;
   };
 
-  if (permLoading) return <div className="min-h-screen flex items-center justify-center bg-gray-50">Vérification des droits...</div>;
+  if (permLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
   if (!hasPermission('products.view')) return null;
 
   const activeCategories = categories.filter(c => c.status !== 'archived');
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
-          <div className="flex items-center space-x-4">
-            <button onClick={() => navigate('/dashboard')} className="text-slate-400 hover:text-slate-600">
-              <ChevronLeft size={24} />
-            </button>
-            <div>
-              <h1 className="text-2xl font-bold text-slate-900 flex items-center">
-                <Package size={24} className="mr-2 text-indigo-600" />
-                Catalogue
-              </h1>
-              <p className="text-sm text-slate-500">
-                {mainTab === 'products' 
-                  ? `${filteredProducts.length} produit(s) ${viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}`
-                  : `${filteredCategories.length} catégorie(s) ${viewMode === 'active' ? 'active(s)' : 'archivée(s)'}`
-                }
-              </p>
-            </div>
-          </div>
-          {viewMode === 'active' && mainTab === 'products' && (
-            <div className="flex gap-2">
-              {hasPermission('products.create') && (
-                <>
-                  <button onClick={handleOpenImport} className="flex items-center space-x-2 bg-amber-600 text-white px-4 py-2.5 rounded-lg hover:bg-amber-700 transition-colors font-medium text-sm">
-                    <Upload size={18} /><span>Importer</span>
-                  </button>
-                  <button onClick={handleOpenAddProduct} className="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors font-medium text-sm">
-                    <Plus size={18} /><span>Nouveau produit</span>
-                  </button>
-                </>
-              )}
-              {mainTab === 'categories' && hasPermission('products.create') && (
-                <button onClick={handleOpenAddCategory} className="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors font-medium text-sm">
-                  <Plus size={18} /><span>Nouvelle catégorie</span>
-                </button>
-              )}
-            </div>
-          )}
-          {viewMode === 'active' && mainTab === 'categories' && hasPermission('products.create') && (
-            <button onClick={handleOpenAddCategory} className="flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors font-medium text-sm">
-              <Plus size={18} /><span>Nouvelle catégorie</span>
-            </button>
-          )}
-        </div>
-      </header>
-
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex border-b border-slate-200 mb-6">
-          <button
-            onClick={() => { setMainTab('products'); setViewMode('active'); }}
-            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-              mainTab === 'products' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Package className="inline mr-2" size={16} />
-            Produits ({products.filter(p => p.status !== 'archived').length})
-          </button>
-          <button
-            onClick={() => { setMainTab('categories'); setViewMode('active'); }}
-            className={`px-6 py-3 text-sm font-medium border-b-2 transition-colors ${
-              mainTab === 'categories' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            <Tag className="inline mr-2" size={16} />
-            Catégories ({categories.filter(c => c.status !== 'archived').length})
-          </button>
-        </div>
-
-        <div className="flex border-b border-slate-200 mb-6">
-          <button
-            onClick={() => setViewMode('active')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              viewMode === 'active' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Actifs ({mainTab === 'products' ? products.filter(p => p.status !== 'archived').length : categories.filter(c => c.status !== 'archived').length})
-          </button>
-          <button
-            onClick={() => setViewMode('archived')}
-            className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              viewMode === 'archived' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700'
-            }`}
-          >
-            Archivés ({mainTab === 'products' ? products.filter(p => p.status === 'archived').length : categories.filter(c => c.status === 'archived').length})
-          </button>
-        </div>
-
-        <div className="flex flex-col sm:flex-row gap-4 mb-6">
-          <div className="relative flex-1">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              placeholder={mainTab === 'products' ? 'Rechercher un produit...' : 'Rechercher une catégorie...'}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm"
-            />
-          </div>
-          {mainTab === 'products' && viewMode === 'active' && (
-            <div className="relative">
-              <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <select
-                value={filterCategory}
-                onChange={(e) => setFilterCategory(e.target.value)}
-                className="pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none text-sm bg-white"
-              >
-                <option value="all">Toutes les catégories</option>
-                {activeCategories.map(cat => (
-                  <option key={cat.$id} value={cat.$id}>{cat.name}</option>
-                ))}
-              </select>
-            </div>
-          )}
-        </div>
-
-        {loading ? (
-          <div className="text-center py-12 text-slate-500">Chargement...</div>
-        ) : mainTab === 'categories' ? (
-          filteredCategories.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <Tag size={48} className="mx-auto text-slate-300 mb-4" />
-              <h3 className="text-lg font-semibold text-slate-700 mb-2">Aucune catégorie {viewMode === 'active' ? 'active' : 'archivée'}</h3>
+    <Sidebar>
+      <div className="min-h-full bg-slate-50 dark:bg-slate-900">
+        {/* HEADER STICKY */}
+        <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div>
+                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Package size={24} className="text-purple-600" />
+                    Catalogue
+                  </h1>
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    {mainTab === 'products' 
+                      ? `${filteredProducts.length} produit(s) ${viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}`
+                      : `${filteredCategories.length} catégorie(s) ${viewMode === 'active' ? 'active(s)' : 'archivée(s)'}`
+                    }
+                  </p>
+                </div>
+              </div>
               {viewMode === 'active' && hasPermission('products.create') && (
-                <button onClick={handleOpenAddCategory} className="inline-flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm mt-4">
-                  <Plus size={16} /><span>Créer une catégorie</span>
-                </button>
+                <div className="flex gap-2 w-full sm:w-auto">
+                  {mainTab === 'products' && (
+                    <>
+                      <button onClick={handleOpenImport} className="flex-1 sm:flex-none items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2.5 rounded-lg hover:bg-amber-700 transition-colors font-medium text-sm flex active:scale-95">
+                        <Upload size={18} /><span className="hidden sm:inline">Importer</span>
+                      </button>
+                      <button onClick={handleOpenAddProduct} className="flex-1 sm:flex-none items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm flex active:scale-95">
+                        <Plus size={18} /><span>Nouveau</span>
+                      </button>
+                    </>
+                  )}
+                  {mainTab === 'categories' && (
+                    <button onClick={handleOpenAddCategory} className="flex-1 sm:flex-none items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm flex active:scale-95">
+                      <Plus size={18} /><span>Nouvelle catégorie</span>
+                    </button>
+                  )}
+                </div>
               )}
             </div>
-          ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b">
-                    <tr>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Nom</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Description</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Produits liés</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Statut</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredCategories.map(cat => {
-                      const linkedProducts = products.filter(p => p.categoryId === cat.$id && p.status !== 'archived').length;
-                      return (
-                        <tr key={cat.$id} className="hover:bg-slate-50 transition-colors">
-                          <td className="px-6 py-4">
-                            <div className="font-medium text-slate-900 flex items-center gap-2">
-                              <Tag size={16} className="text-indigo-500" />
+          </div>
+        </header>
+
+        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+          {/* ONGLETS PRINCIPAUX */}
+          <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
+            <button onClick={() => { setMainTab('products'); setViewMode('active'); }} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${mainTab === 'products' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              <Package className="inline mr-2" size={16} />
+              Produits
+            </button>
+            <button onClick={() => { setMainTab('categories'); setViewMode('active'); }} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${mainTab === 'categories' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              <Tag className="inline mr-2" size={16} />
+              Catégories
+            </button>
+          </div>
+
+          {/* ONGLETS STATUT */}
+          <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
+            <button onClick={() => setViewMode('active')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              Actifs ({mainTab === 'products' ? products.filter(p => p.status !== 'archived').length : categories.filter(c => c.status !== 'archived').length})
+            </button>
+            <button onClick={() => setViewMode('archived')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
+              Archivés ({mainTab === 'products' ? products.filter(p => p.status === 'archived').length : categories.filter(c => c.status === 'archived').length})
+            </button>
+          </div>
+
+          {/* BARRE DE RECHERCHE ET FILTRES */}
+          <div className="flex flex-col sm:flex-row gap-3 mb-6">
+            <div className="relative flex-1">
+              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder={mainTab === 'products' ? 'Rechercher un produit...' : 'Rechercher une catégorie...'}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm transition-shadow"
+              />
+            </div>
+            {mainTab === 'products' && viewMode === 'active' && (
+              <div className="relative sm:w-64">
+                <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none"
+                >
+                  <option value="all">Toutes les catégories</option>
+                  {activeCategories.map(cat => (
+                    <option key={cat.$id} value={cat.$id}>{cat.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+
+          {/* CONTENU : TABLEAU DESKTOP / CARTES MOBILE */}
+          {loading ? (
+            <div className="text-center py-12 text-slate-500 dark:text-slate-400 animate-pulse">Chargement...</div>
+          ) : mainTab === 'categories' ? (
+            filteredCategories.length === 0 ? (
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center shadow-sm">
+                <Tag size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+                <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Aucune catégorie {viewMode === 'active' ? 'active' : 'archivée'}</h3>
+                {viewMode === 'active' && hasPermission('products.create') && (
+                  <button onClick={handleOpenAddCategory} className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm mt-4 active:scale-95 transition-transform">
+                    <Plus size={16} /><span>Créer une catégorie</span>
+                  </button>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* VERSION DESKTOP (Tableau) */}
+                <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nom</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Description</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Produits liés</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statut</th>
+                          <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredCategories.map(cat => {
+                          const linkedProducts = products.filter(p => p.categoryId === cat.$id && p.status !== 'archived').length;
+                          return (
+                            <tr key={cat.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                              <td className="px-6 py-4">
+                                <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                                  <Tag size={16} className="text-purple-500" />
+                                  {cat.name}
+                                </div>
+                              </td>
+                              <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{cat.description || '-'}</td>
+                              <td className="px-6 py-4">
+                                <span className="inline-flex items-center gap-1 text-xs font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded">
+                                  <Package size={12} />
+                                  {linkedProducts} produit(s)
+                                </span>
+                              </td>
+                              <td className="px-6 py-4">
+                                <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[cat.status]}`}>
+                                  {statusLabels[cat.status]}
+                                </span>
+                              </td>
+                              <td className="px-6 py-4 text-right">
+                                <div className="flex items-center justify-end gap-1">
+                                  {viewMode === 'active' ? (
+                                    <>
+                                      {hasPermission('products.edit') && (
+                                        <button onClick={() => handleOpenEditCategory(cat)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier">
+                                          <Edit2 size={16} />
+                                        </button>
+                                      )}
+                                      {hasPermission('products.delete') && (
+                                        <button onClick={() => handleArchiveCategory(cat.$id, cat.name)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors" title="Archiver">
+                                          <Archive size={16} />
+                                        </button>
+                                      )}
+                                    </>
+                                  ) : (
+                                    <button onClick={() => handleUnarchiveCategory(cat.$id, cat.name)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors">
+                                      <RotateCcw size={14} /><span>Désarchiver</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* VERSION MOBILE (Cartes) */}
+                <div className="md:hidden space-y-4">
+                  {filteredCategories.map(cat => {
+                    const linkedProducts = products.filter(p => p.categoryId === cat.$id && p.status !== 'archived').length;
+                    return (
+                      <div key={cat.$id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
+                        <div className="flex justify-between items-start mb-3">
+                          <div>
+                            <h3 className="font-semibold text-slate-900 dark:text-white flex items-center gap-2">
+                              <Tag size={16} className="text-purple-500" />
                               {cat.name}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600">{cat.description || '-'}</td>
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center gap-1 text-xs font-semibold text-indigo-700 bg-indigo-50 px-2 py-1 rounded">
-                              <Package size={12} />
-                              {linkedProducts} produit(s)
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[cat.status]}`}>
-                              {statusLabels[cat.status]}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end space-x-2">
-                              {viewMode === 'active' ? (
-                                <>
-                                  {hasPermission('products.edit') && (
-                                    <button onClick={() => handleOpenEditCategory(cat)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Modifier">
-                                      <Edit2 size={16} />
-                                    </button>
-                                  )}
-                                  {hasPermission('products.delete') && (
-                                    <button onClick={() => handleArchiveCategory(cat.$id, cat.name)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors" title="Archiver">
-                                      <Archive size={16} />
-                                    </button>
-                                  )}
-                                </>
-                              ) : (
-                                <button onClick={() => handleUnarchiveCategory(cat.$id, cat.name)} className="inline-flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
-                                  <RotateCcw size={14} /><span>Désarchiver</span>
+                            </h3>
+                            <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">{cat.description || 'Aucune description'}</p>
+                          </div>
+                          <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[cat.status]}`}>
+                            {statusLabels[cat.status]}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-xs font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1.5 rounded mb-4 w-fit">
+                          <Package size={12} />
+                          {linkedProducts} produit(s) lié(s)
+                        </div>
+                        <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+                          {viewMode === 'active' ? (
+                            <div className="grid grid-cols-2 gap-2">
+                              {hasPermission('products.edit') && (
+                                <button onClick={() => handleOpenEditCategory(cat)} className="flex items-center justify-center gap-2 p-2.5 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
+                                  <Edit2 size={18} /><span className="text-sm font-medium">Modifier</span>
+                                </button>
+                              )}
+                              {hasPermission('products.delete') && (
+                                <button onClick={() => handleArchiveCategory(cat.$id, cat.name)} className="flex items-center justify-center gap-2 p-2.5 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">
+                                  <Archive size={18} /><span className="text-sm font-medium">Archiver</span>
                                 </button>
                               )}
                             </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )
-        ) : (
-          filteredProducts.length === 0 ? (
-            <div className="bg-white rounded-lg shadow p-12 text-center">
-              <Package size={48} className="mx-auto text-slate-300 mb-4" />
-              <h3 className="text-lg font-semibold text-slate-700 mb-2">Aucun produit {viewMode === 'active' ? 'actif' : 'archivé'}</h3>
-              <p className="text-slate-500 mb-4">Importez vos produits depuis un fichier Excel/CSV ou créez-les manuellement.</p>
-              {viewMode === 'active' && hasPermission('products.create') && (
-                <div className="flex gap-2 justify-center">
-                  <button onClick={handleOpenImport} className="inline-flex items-center space-x-2 bg-amber-600 text-white px-4 py-2 rounded-lg hover:bg-amber-700 text-sm">
-                    <Upload size={16} /><span>Importer</span>
-                  </button>
-                  <button onClick={handleOpenAddProduct} className="inline-flex items-center space-x-2 bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm">
-                    <Plus size={16} /><span>Créer un produit</span>
-                  </button>
+                          ) : (
+                            <button onClick={() => handleUnarchiveCategory(cat.$id, cat.name)} className="w-full flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
+                              <RotateCcw size={16} /><span>Désarchiver</span>
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
-              )}
-            </div>
+              </>
+            )
           ) : (
-            <div className="bg-white rounded-lg shadow overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full">
-                  <thead className="bg-slate-50 border-b">
-                    <tr>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Réf.</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Nom</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Catégorie</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Prix unitaire</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Unité</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">TVA</th>
-                      <th className="text-left px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Statut</th>
-                      <th className="text-right px-6 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {filteredProducts.map(prod => (
-                      <tr key={prod.$id} className="hover:bg-slate-50 transition-colors">
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-indigo-700 bg-indigo-50 px-2 py-1 rounded">
-                            <Hash size={12} />
-                            {prod.reference || '—'}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <div className="font-medium text-slate-900">{prod.name}</div>
-                          {prod.description && <div className="text-xs text-slate-500 mt-1 line-clamp-1">{prod.description}</div>}
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">
-                          {prod.category ? (
-                            <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-700 bg-indigo-50 px-2 py-1 rounded">
-                              <Tag size={12} />
-                              {prod.category.name}
-                            </span>
-                          ) : '-'}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900">
-                            <DollarSign size={14} className="text-green-600" />
-                            {fm(prod.unitPrice)}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm text-slate-600">{prod.unit}</td>
-                        <td className="px-6 py-4">
-                          <span className="inline-flex items-center gap-1 text-sm font-medium text-slate-700">
-                            <Percent size={14} className="text-slate-500" />
-                            {prod.tvaRate}%
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[prod.status]}`}>
-                            {statusLabels[prod.status]}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <div className="flex items-center justify-end space-x-2">
-                            {viewMode === 'active' ? (
-                              <>
-                                {hasPermission('products.edit') && (
-                                  <button onClick={() => handleOpenEditProduct(prod)} className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors" title="Modifier">
-                                    <Edit2 size={16} />
-                                  </button>
-                                )}
-                                {hasPermission('products.delete') && (
-                                  <button onClick={() => handleArchiveProduct(prod.$id, prod.name)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 rounded-lg transition-colors" title="Archiver">
-                                    <Archive size={16} />
-                                  </button>
-                                )}
-                              </>
-                            ) : (
-                              <button onClick={() => handleUnarchiveProduct(prod.$id, prod.name)} className="inline-flex items-center space-x-1 px-3 py-1.5 text-sm font-medium text-green-700 bg-green-50 rounded-lg hover:bg-green-100 transition-colors">
-                                <RotateCcw size={14} /><span>Désarchiver</span>
-                              </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )
-        )}
-      </div>
-
-      {showImportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-            <div className="flex items-center justify-between px-6 py-4 border-b bg-white">
-              <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <Upload className="text-amber-600" size={24} />
-                {importStep === 'upload' && 'Importer des produits'}
-                {importStep === 'preview' && 'Prévisualisation de l\'import'}
-                {importStep === 'importing' && 'Import en cours...'}
-                {importStep === 'done' && 'Import terminé'}
-              </h2>
-              <button 
-                onClick={() => setShowImportModal(false)} 
-                disabled={importing}
-                className="p-2 hover:bg-slate-100 rounded-lg disabled:opacity-50"
-              >
-                <X size={20} className="text-slate-500" />
-              </button>
-            </div>
-
-            <div className="flex-1 overflow-y-auto p-6">
-              {importStep === 'upload' && (
-                <div className="space-y-6">
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <p className="text-sm text-blue-900">
-                      <strong>💡 Astuce :</strong> Téléchargez le modèle Excel pour voir le format attendu, puis remplissez-le avec vos produits.
-                    </p>
-                    <button 
-                      onClick={handleDownloadTemplate}
-                      className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-700 bg-white border border-blue-300 rounded-lg hover:bg-blue-50"
-                    >
-                      <Download size={16} />
-                      Télécharger le modèle Excel
+            filteredProducts.length === 0 ? (
+              <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center shadow-sm">
+                <Package size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
+                <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Aucun produit {viewMode === 'active' ? 'actif' : 'archivé'}</h3>
+                <p className="text-slate-500 dark:text-slate-400 mb-4">Importez vos produits depuis un fichier Excel/CSV ou créez-les manuellement.</p>
+                {viewMode === 'active' && hasPermission('products.create') && (
+                  <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                    <button onClick={handleOpenImport} className="inline-flex items-center justify-center gap-2 bg-amber-600 text-white px-4 py-2.5 rounded-lg hover:bg-amber-700 text-sm active:scale-95 transition-transform">
+                      <Upload size={16} /><span>Importer</span>
+                    </button>
+                    <button onClick={handleOpenAddProduct} className="inline-flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 text-sm active:scale-95 transition-transform">
+                      <Plus size={16} /><span>Créer un produit</span>
                     </button>
                   </div>
-
-                  <div 
-                    className="border-2 border-dashed border-slate-300 rounded-lg p-12 text-center hover:border-amber-500 transition-colors cursor-pointer"
-                    onClick={() => fileInputRef.current?.click()}
-                  >
-                    <FileSpreadsheet size={48} className="mx-auto text-slate-400 mb-4" />
-                    <h3 className="text-lg font-semibold text-slate-700 mb-2">
-                      Cliquez pour sélectionner un fichier
-                    </h3>
-                    <p className="text-sm text-slate-500 mb-4">
-                      Formats supportés : <strong>.csv</strong>, <strong>.xlsx</strong>, <strong>.xls</strong>
-                    </p>
-                    <p className="text-xs text-slate-400">
-                      Colonnes attendues : Référence, Désignation, Description, Prix, Unité, TVA, Catégorie
-                    </p>
-                    <input
-                      ref={fileInputRef}
-                      type="file"
-                      accept=".csv,.xlsx,.xls"
-                      onChange={handleFileSelect}
-                      className="hidden"
-                    />
-                  </div>
-
-                  <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-slate-700 mb-2">📋 Colonnes reconnues (flexibles) :</h4>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
-                      <div><strong>Désignation</strong> <span className="text-red-600">*</span> (nom, designation)</div>
-                      <div><strong>Prix</strong> <span className="text-red-600">*</span> (price, prix unitaire)</div>
-                      <div><strong>Unité</strong> <span className="text-red-600">*</span> (unite, unit)</div>
-                      <div><strong>Référence</strong> (ref, reference)</div>
-                      <div><strong>Description</strong> (desc)</div>
-                      <div><strong>TVA</strong> (tva rate, taux tva)</div>
-                      <div><strong>Catégorie</strong> (categorie, category)</div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {importStep === 'preview' && (
-                <div className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 text-center">
-                      <p className="text-xs text-slate-500 uppercase font-semibold">Total lignes</p>
-                      <p className="text-2xl font-bold text-slate-900 mt-1">{importStats.total}</p>
-                    </div>
-                    <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center">
-                      <p className="text-xs text-green-700 uppercase font-semibold">Importables</p>
-                      <p className="text-2xl font-bold text-green-700 mt-1">{importStats.valid}</p>
-                    </div>
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-center">
-                      <p className="text-xs text-amber-700 uppercase font-semibold">Doublons</p>
-                      <p className="text-2xl font-bold text-amber-700 mt-1">{importStats.duplicates}</p>
-                    </div>
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-center">
-                      <p className="text-xs text-red-700 uppercase font-semibold">Erreurs</p>
-                      <p className="text-2xl font-bold text-red-700 mt-1">{importStats.errors}</p>
-                    </div>
-                  </div>
-
-                  {importStats.errors > 0 && (
-                    <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-                      <p className="text-sm text-red-800 font-semibold flex items-center gap-2">
-                        <AlertCircle size={16} />
-                        {importStats.errors} ligne(s) contiennent des erreurs et ne seront pas importées.
-                      </p>
-                    </div>
-                  )}
-
-                  {importStats.duplicates > 0 && (
-                    <div className="bg-amber-50 border border-amber-200 rounded-lg p-4">
-                      <p className="text-sm text-amber-800 font-semibold flex items-center gap-2">
-                        <AlertCircle size={16} />
-                        {importStats.duplicates} doublon(s) détecté(s) et ignoré(s).
-                      </p>
-                    </div>
-                  )}
-
-                  <div className="border border-slate-200 rounded-lg overflow-hidden">
-                    <div className="overflow-x-auto max-h-96">
-                      <table className="w-full text-sm">
-                        <thead className="bg-slate-50 border-b sticky top-0">
-                          <tr>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Ligne</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Statut</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Réf.</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Désignation</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Prix</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Unité</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">TVA</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Catégorie</th>
-                            <th className="px-3 py-2 text-left text-xs font-semibold text-slate-500">Détail</th>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* VERSION DESKTOP (Tableau) */}
+                <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                        <tr>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Réf.</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Nom</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Catégorie</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Prix unitaire</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Unité</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">TVA</th>
+                          <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statut</th>
+                          <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                        {filteredProducts.map(prod => (
+                          <tr key={prod.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded">
+                                <Hash size={12} />
+                                {prod.reference || '—'}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <div className="font-medium text-slate-900 dark:text-white">{prod.name}</div>
+                              {prod.description && <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-1">{prod.description}</div>}
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">
+                              {prod.category ? (
+                                <span className="inline-flex items-center gap-1 text-xs font-medium text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded">
+                                  <Tag size={12} />
+                                  {prod.category.name}
+                                </span>
+                              ) : '-'}
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center gap-1 text-sm font-semibold text-slate-900 dark:text-white">
+                                <DollarSign size={14} className="text-green-600" />
+                                {fm(prod.unitPrice)}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{prod.unit}</td>
+                            <td className="px-6 py-4">
+                              <span className="inline-flex items-center gap-1 text-sm font-medium text-slate-700 dark:text-slate-300">
+                                <Percent size={14} className="text-slate-500" />
+                                {prod.tvaRate}%
+                              </span>
+                            </td>
+                            <td className="px-6 py-4">
+                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[prod.status]}`}>
+                                {statusLabels[prod.status]}
+                              </span>
+                            </td>
+                            <td className="px-6 py-4 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                {viewMode === 'active' ? (
+                                  <>
+                                    {hasPermission('products.edit') && (
+                                      <button onClick={() => handleOpenEditProduct(prod)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier">
+                                        <Edit2 size={16} />
+                                      </button>
+                                    )}
+                                    {hasPermission('products.delete') && (
+                                      <button onClick={() => handleArchiveProduct(prod.$id, prod.name)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors" title="Archiver">
+                                        <Archive size={16} />
+                                      </button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <button onClick={() => handleUnarchiveProduct(prod.$id, prod.name)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors">
+                                    <RotateCcw size={14} /><span>Désarchiver</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
                           </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {importedProducts.map((p, idx) => (
-                            <tr key={idx} className={
-                              p.status === 'valid' ? 'bg-white' :
-                              p.status === 'duplicate' ? 'bg-amber-50' : 'bg-red-50'
-                            }>
-                              <td className="px-3 py-2 text-xs text-slate-500">{p.rowIndex}</td>
-                              <td className="px-3 py-2">
-                                {p.status === 'valid' && <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700"><CheckCircle2 size={14} />OK</span>}
-                                {p.status === 'duplicate' && <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700"><AlertCircle size={14} />Doublon</span>}
-                                {p.status === 'error' && <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700"><AlertCircle size={14} />Erreur</span>}
-                              </td>
-                              <td className="px-3 py-2 text-xs font-mono text-slate-600">{p.reference || '-'}</td>
-                              <td className="px-3 py-2 font-medium text-slate-900">{p.name}</td>
-                              <td className="px-3 py-2 text-xs text-slate-700">{p.unitPrice.toFixed(2)} €</td>
-                              <td className="px-3 py-2 text-xs text-slate-600">{p.unit}</td>
-                              <td className="px-3 py-2 text-xs text-slate-600">{p.tvaRate}%</td>
-                              <td className="px-3 py-2 text-xs text-slate-600">{p.categoryName || '-'}</td>
-                              <td className="px-3 py-2 text-xs">
-                                {p.error && <span className="text-red-600">{p.error}</span>}
-                                {p.duplicateOf && <span className="text-amber-600">{p.duplicateOf}</span>}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
-              )}
 
-              {importStep === 'importing' && (
-                <div className="text-center py-12">
-                  <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-amber-600 border-t-transparent mb-4"></div>
-                  <p className="text-lg font-semibold text-slate-700">Import en cours...</p>
-                  <p className="text-sm text-slate-500 mt-2">Veuillez patienter, {importStats.valid} produits sont en cours de création.</p>
+                {/* VERSION MOBILE (Cartes) */}
+                <div className="md:hidden space-y-4">
+                  {filteredProducts.map(prod => (
+                    <div key={prod.$id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
+                      <div className="flex justify-between items-start mb-3">
+                        <div>
+                          <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded mb-1">
+                            <Hash size={12} /> {prod.reference || 'Sans réf.'}
+                          </span>
+                          <h3 className="font-semibold text-slate-900 dark:text-white">{prod.name}</h3>
+                          {prod.description && <p className="text-xs text-slate-500 dark:text-slate-400 mt-1 line-clamp-2">{prod.description}</p>}
+                        </div>
+                        <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[prod.status]}`}>
+                          {statusLabels[prod.status]}
+                        </span>
+                      </div>
+                      
+                      <div className="grid grid-cols-2 gap-2 py-3 border-t border-b border-slate-100 dark:border-slate-700 mb-3 text-sm">
+                        <div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Prix</p>
+                          <p className="font-bold text-slate-900 dark:text-white flex items-center gap-1"><DollarSign size={12} className="text-green-600" />{fm(prod.unitPrice)}</p>
+                        </div>
+                        <div>
+                          <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Unité / TVA</p>
+                          <p className="font-medium text-slate-900 dark:text-white">{prod.unit} / {prod.tvaRate}%</p>
+                        </div>
+                        {prod.category && (
+                          <div className="col-span-2">
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Catégorie</p>
+                            <p className="font-medium text-purple-700 dark:text-purple-400 flex items-center gap-1"><Tag size={12} />{prod.category.name}</p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        {viewMode === 'active' ? (
+                          <>
+                            {hasPermission('products.edit') && (
+                              <button onClick={() => handleOpenEditProduct(prod)} className="flex items-center justify-center gap-2 p-2.5 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
+                                <Edit2 size={18} /><span className="text-sm font-medium">Modifier</span>
+                              </button>
+                            )}
+                            {hasPermission('products.delete') && (
+                              <button onClick={() => handleArchiveProduct(prod.$id, prod.name)} className="flex items-center justify-center gap-2 p-2.5 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">
+                                <Archive size={18} /><span className="text-sm font-medium">Archiver</span>
+                              </button>
+                            )}
+                          </>
+                        ) : (
+                          <button onClick={() => handleUnarchiveProduct(prod.$id, prod.name)} className="col-span-2 flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
+                            <RotateCcw size={16} /><span>Désarchiver</span>
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              )}
+              </>
+            )
+          )}
+        </main>
 
-              {importStep === 'done' && (
-                <div className="text-center py-12">
-                  <CheckCircle2 size={64} className="mx-auto text-green-600 mb-4" />
-                  <h3 className="text-xl font-bold text-slate-900 mb-2">Import terminé !</h3>
-                  <p className="text-slate-600">
-                    <strong className="text-green-700">{importResult.success}</strong> produit(s) importé(s) avec succès.
-                    {importResult.failed > 0 && (
-                      <> <strong className="text-red-700">{importResult.failed}</strong> erreur(s).</>
+        {/* MODAL IMPORT - OPTIMISÉ MOBILE */}
+        {showImportModal && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-5xl max-h-[90vh] overflow-hidden flex flex-col animate-slideUp">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 flex-shrink-0">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <Upload className="text-amber-600" size={24} />
+                  {importStep === 'upload' && 'Importer des produits'}
+                  {importStep === 'preview' && 'Prévisualisation de l\'import'}
+                  {importStep === 'importing' && 'Import en cours...'}
+                  {importStep === 'done' && 'Import terminé'}
+                </h2>
+                <button onClick={() => setShowImportModal(false)} disabled={importing} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg disabled:opacity-50 transition-colors">
+                  <X size={20} className="text-slate-500 dark:text-slate-400" />
+                </button>
+              </div>
+
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+                {importStep === 'upload' && (
+                  <div className="space-y-6">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <p className="text-sm text-blue-900 dark:text-blue-200">
+                        <strong>💡 Astuce :</strong> Téléchargez le modèle Excel pour voir le format attendu, puis remplissez-le avec vos produits.
+                      </p>
+                      <button onClick={handleDownloadTemplate} className="mt-3 inline-flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-700 dark:text-blue-300 bg-white dark:bg-slate-800 border border-blue-300 dark:border-blue-700 rounded-lg hover:bg-blue-50 dark:hover:bg-slate-700 transition-colors">
+                        <Download size={16} />
+                        Télécharger le modèle Excel
+                      </button>
+                    </div>
+
+                    <div className="border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg p-8 sm:p-12 text-center hover:border-amber-500 dark:hover:border-amber-500 transition-colors cursor-pointer" onClick={() => fileInputRef.current?.click()}>
+                      <FileSpreadsheet size={48} className="mx-auto text-slate-400 dark:text-slate-500 mb-4" />
+                      <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Cliquez pour sélectionner un fichier</h3>
+                      <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Formats supportés : <strong>.csv</strong>, <strong>.xlsx</strong>, <strong>.xls</strong></p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500">Colonnes attendues : Référence, Désignation, Description, Prix, Unité, TVA, Catégorie</p>
+                      <input ref={fileInputRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileSelect} className="hidden" />
+                    </div>
+
+                    <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-2">📋 Colonnes reconnues (flexibles) :</h4>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-2 text-xs text-slate-600 dark:text-slate-400">
+                        <div><strong>Désignation</strong> <span className="text-red-600">*</span> (nom, designation)</div>
+                        <div><strong>Prix</strong> <span className="text-red-600">*</span> (price, prix unitaire)</div>
+                        <div><strong>Unité</strong> <span className="text-red-600">*</span> (unite, unit)</div>
+                        <div><strong>Référence</strong> (ref, reference)</div>
+                        <div><strong>Description</strong> (desc)</div>
+                        <div><strong>TVA</strong> (tva rate, taux tva)</div>
+                        <div><strong>Catégorie</strong> (categorie, category)</div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {importStep === 'preview' && (
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4">
+                      <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg p-4 text-center">
+                        <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Total lignes</p>
+                        <p className="text-2xl font-bold text-slate-900 dark:text-white mt-1">{importStats.total}</p>
+                      </div>
+                      <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 text-center">
+                        <p className="text-xs text-green-700 dark:text-green-300 uppercase font-semibold">Importables</p>
+                        <p className="text-2xl font-bold text-green-700 dark:text-green-300 mt-1">{importStats.valid}</p>
+                      </div>
+                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 text-center">
+                        <p className="text-xs text-amber-700 dark:text-amber-300 uppercase font-semibold">Doublons</p>
+                        <p className="text-2xl font-bold text-amber-700 dark:text-amber-300 mt-1">{importStats.duplicates}</p>
+                      </div>
+                      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 text-center">
+                        <p className="text-xs text-red-700 dark:text-red-300 uppercase font-semibold">Erreurs</p>
+                        <p className="text-2xl font-bold text-red-700 dark:text-red-300 mt-1">{importStats.errors}</p>
+                      </div>
+                    </div>
+
+                    {importStats.errors > 0 && (
+                      <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
+                        <p className="text-sm text-red-800 dark:text-red-200 font-semibold flex items-center gap-2">
+                          <AlertCircle size={16} />
+                          {importStats.errors} ligne(s) contiennent des erreurs et ne seront pas importées.
+                        </p>
+                      </div>
                     )}
-                  </p>
-                </div>
-              )}
-            </div>
 
-            <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-slate-50">
-              {importStep === 'upload' && (
-                <button 
-                  onClick={() => setShowImportModal(false)} 
-                  className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-                >
+                    {importStats.duplicates > 0 && (
+                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                        <p className="text-sm text-amber-800 dark:text-amber-200 font-semibold flex items-center gap-2">
+                          <AlertCircle size={16} />
+                          {importStats.duplicates} doublon(s) détecté(s) et ignoré(s).
+                        </p>
+                      </div>
+                    )}
+
+                    <div className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                      <div className="overflow-x-auto max-h-96">
+                        <table className="w-full text-sm min-w-[600px]">
+                          <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 sticky top-0">
+                            <tr>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Ligne</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Statut</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Réf.</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Désignation</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Prix</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Unité</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">TVA</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Catégorie</th>
+                              <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 dark:text-slate-400">Détail</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
+                            {importedProducts.map((p, idx) => (
+                              <tr key={idx} className={p.status === 'valid' ? 'bg-white dark:bg-slate-800' : p.status === 'duplicate' ? 'bg-amber-50 dark:bg-amber-900/20' : 'bg-red-50 dark:bg-red-900/20'}>
+                                <td className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">{p.rowIndex}</td>
+                                <td className="px-3 py-3">
+                                  {p.status === 'valid' && <span className="inline-flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-300"><CheckCircle2 size={14} />OK</span>}
+                                  {p.status === 'duplicate' && <span className="inline-flex items-center gap-1 text-xs font-medium text-amber-700 dark:text-amber-300"><AlertCircle size={14} />Doublon</span>}
+                                  {p.status === 'error' && <span className="inline-flex items-center gap-1 text-xs font-medium text-red-700 dark:text-red-300"><AlertCircle size={14} />Erreur</span>}
+                                </td>
+                                <td className="px-3 py-3 text-xs font-mono text-slate-600 dark:text-slate-300">{p.reference || '-'}</td>
+                                <td className="px-3 py-3 font-medium text-slate-900 dark:text-white">{p.name}</td>
+                                <td className="px-3 py-3 text-xs text-slate-700 dark:text-slate-300">{p.unitPrice.toFixed(2)} €</td>
+                                <td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-400">{p.unit}</td>
+                                <td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-400">{p.tvaRate}%</td>
+                                <td className="px-3 py-3 text-xs text-slate-600 dark:text-slate-400">{p.categoryName || '-'}</td>
+                                <td className="px-3 py-3 text-xs">
+                                  {p.error && <span className="text-red-600 dark:text-red-400">{p.error}</span>}
+                                  {p.duplicateOf && <span className="text-amber-600 dark:text-amber-400">{p.duplicateOf}</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {importStep === 'importing' && (
+                  <div className="text-center py-12">
+                    <div className="inline-block animate-spin rounded-full h-12 w-12 border-4 border-amber-600 border-t-transparent mb-4"></div>
+                    <p className="text-lg font-semibold text-slate-700 dark:text-slate-300">Import en cours...</p>
+                    <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">Veuillez patienter, {importStats.valid} produits sont en cours de création.</p>
+                  </div>
+                )}
+
+                {importStep === 'done' && (
+                  <div className="text-center py-12">
+                    <CheckCircle2 size={64} className="mx-auto text-green-600 dark:text-green-400 mb-4" />
+                    <h3 className="text-xl font-bold text-slate-900 dark:text-white mb-2">Import terminé !</h3>
+                    <p className="text-slate-600 dark:text-slate-400">
+                      <strong className="text-green-700 dark:text-green-400">{importResult.success}</strong> produit(s) importé(s) avec succès.
+                      {importResult.failed > 0 && (
+                        <> <strong className="text-red-700 dark:text-red-400">{importResult.failed}</strong> erreur(s).</>
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 flex-shrink-0">
+                {importStep === 'upload' && (
+                  <button onClick={() => setShowImportModal(false)} className="w-full sm:w-auto px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                    Annuler
+                  </button>
+                )}
+                {importStep === 'preview' && (
+                  <>
+                    <button onClick={() => { setImportStep('upload'); setImportedProducts([]); }} className="flex-1 sm:flex-none px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                      ← Choisir un autre fichier
+                    </button>
+                    <button onClick={handleConfirmImport} disabled={importStats.valid === 0} className="flex-1 sm:flex-none px-4 py-3 text-sm font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center justify-center gap-2 active:scale-95 transition-all">
+                      <Upload size={16} />
+                      Importer {importStats.valid} produit(s)
+                    </button>
+                  </>
+                )}
+                {importStep === 'done' && (
+                  <button onClick={() => setShowImportModal(false)} className="w-full sm:w-auto px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 active:scale-95 transition-all">
+                    Fermer
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL CATÉGORIE - OPTIMISÉ MOBILE */}
+        {showCategoryModal && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-lg animate-slideUp">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+                  {editingCategoryId ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
+                </h2>
+                <button onClick={() => setShowCategoryModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X size={20} className="text-slate-500 dark:text-slate-400" />
+                </button>
+              </div>
+              <div className="px-4 sm:px-6 py-4 space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Nom *</label>
+                  <input
+                    type="text"
+                    value={categoryForm.name}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
+                    className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none"
+                    placeholder="Ex: Plomberie, Électricité..."
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Description</label>
+                  <textarea
+                    value={categoryForm.description}
+                    onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
+                    rows={3}
+                    className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none"
+                    placeholder="Description optionnelle..."
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 rounded-b-2xl">
+                <button onClick={() => setShowCategoryModal(false)} className="flex-1 sm:flex-none px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
                   Annuler
                 </button>
-              )}
-              {importStep === 'preview' && (
-                <>
-                  <button 
-                    onClick={() => { setImportStep('upload'); setImportedProducts([]); }}
-                    className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50"
-                  >
-                    ← Choisir un autre fichier
-                  </button>
-                  <button 
-                    onClick={handleConfirmImport}
-                    disabled={importStats.valid === 0}
-                    className="px-4 py-2.5 text-sm font-semibold text-white bg-amber-600 rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-2"
-                  >
-                    <Upload size={16} />
-                    Importer {importStats.valid} produit(s)
-                  </button>
-                </>
-              )}
-              {importStep === 'done' && (
-                <button 
-                  onClick={() => setShowImportModal(false)}
-                  className="px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700"
-                >
-                  Fermer
+                <button onClick={handleSaveCategory} disabled={savingCategory || !categoryForm.name.trim()} className="flex-1 sm:flex-none px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 active:scale-95 transition-all">
+                  {savingCategory ? 'Enregistrement...' : editingCategoryId ? 'Mettre à jour' : 'Créer'}
                 </button>
-              )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {showCategoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-            <div className="flex items-center justify-between px-6 py-4 border-b">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingCategoryId ? 'Modifier la catégorie' : 'Nouvelle catégorie'}
-              </h2>
-              <button onClick={() => setShowCategoryModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} className="text-slate-500" />
-              </button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nom *</label>
-                <input
-                  type="text"
-                  value={categoryForm.name}
-                  onChange={(e) => setCategoryForm({ ...categoryForm, name: e.target.value })}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm"
-                  placeholder="Ex: Plomberie, Électricité..."
-                />
+        {/* MODAL PRODUIT - OPTIMISÉ MOBILE */}
+        {showProductModal && (
+          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
+            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto animate-slideUp">
+              <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700 sticky top-0 bg-white dark:bg-slate-800 z-10">
+                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">
+                  {editingProductId ? 'Modifier le produit' : 'Nouveau produit'}
+                </h2>
+                <button onClick={() => setShowProductModal(false)} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
+                  <X size={20} className="text-slate-500 dark:text-slate-400" />
+                </button>
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea
-                  value={categoryForm.description}
-                  onChange={(e) => setCategoryForm({ ...categoryForm, description: e.target.value })}
-                  rows={3}
-                  className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm"
-                  placeholder="Description optionnelle..."
-                />
-              </div>
-            </div>
-            <div className="flex items-center justify-end space-x-3 px-6 py-4 border-t bg-slate-50 rounded-b-xl">
-              <button onClick={() => setShowCategoryModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Annuler</button>
-              <button onClick={handleSaveCategory} disabled={savingCategory || !categoryForm.name.trim()} className="px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {savingCategory ? 'Enregistrement...' : editingCategoryId ? 'Mettre à jour' : 'Créer'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {showProductModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-            <div className="flex items-center justify-between px-6 py-4 border-b sticky top-0 bg-white z-10">
-              <h2 className="text-xl font-bold text-slate-900">
-                {editingProductId ? 'Modifier le produit' : 'Nouveau produit'}
-              </h2>
-              <button onClick={() => setShowProductModal(false)} className="p-2 hover:bg-slate-100 rounded-lg">
-                <X size={20} className="text-slate-500" />
-              </button>
-            </div>
-            <div className="px-6 py-4 space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Nom *</label>
-                  <input type="text" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" placeholder="Ex: Installation WC standard" />
+              <div className="px-4 sm:px-6 py-4 space-y-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Nom *</label>
+                    <input type="text" value={productForm.name} onChange={(e) => setProductForm({ ...productForm, name: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Ex: Installation WC standard" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Référence</label>
+                    <input type="text" value={productForm.reference} onChange={(e) => setProductForm({ ...productForm, reference: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Ex: WC-001" />
+                  </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Référence</label>
-                  <input type="text" value={productForm.reference} onChange={(e) => setProductForm({ ...productForm, reference: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" placeholder="Ex: WC-001" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-                <textarea value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} rows={3} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" placeholder="Description détaillée..." />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Catégorie</label>
-                <select value={productForm.categoryId} onChange={(e) => setProductForm({ ...productForm, categoryId: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
-                  <option value="">-- Aucune catégorie --</option>
-                  {activeCategories.map(cat => (<option key={cat.$id} value={cat.$id}>{cat.name}</option>))}
-                </select>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Prix unitaire HT *</label>
-                  <input type="number" step="0.01" min="0" value={productForm.unitPrice} onChange={(e) => setProductForm({ ...productForm, unitPrice: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm" placeholder="0.00" />
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Description</label>
+                  <textarea value={productForm.description} onChange={(e) => setProductForm({ ...productForm, description: e.target.value })} rows={3} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none" placeholder="Description détaillée..." />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">Unité</label>
-                  <select value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
-                    {unitOptions.map(u => <option key={u} value={u}>{u}</option>)}
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Catégorie</label>
+                  <select value={productForm.categoryId} onChange={(e) => setProductForm({ ...productForm, categoryId: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
+                    <option value="">-- Aucune catégorie --</option>
+                    {activeCategories.map(cat => (<option key={cat.$id} value={cat.$id}>{cat.name}</option>))}
                   </select>
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 mb-1">TVA (%)</label>
-                  <select value={productForm.tvaRate} onChange={(e) => setProductForm({ ...productForm, tvaRate: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white">
-                    {tvaOptions.map(t => <option key={t} value={t}>{t}%</option>)}
-                  </select>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Prix unitaire HT *</label>
+                    <input type="number" step="0.01" min="0" value={productForm.unitPrice} onChange={(e) => setProductForm({ ...productForm, unitPrice: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="0.00" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Unité</label>
+                    <select value={productForm.unit} onChange={(e) => setProductForm({ ...productForm, unit: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
+                      {unitOptions.map(u => <option key={u} value={u}>{u}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">TVA (%)</label>
+                    <select value={productForm.tvaRate} onChange={(e) => setProductForm({ ...productForm, tvaRate: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
+                      {tvaOptions.map(t => <option key={t} value={t}>{t}%</option>)}
+                    </select>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="flex items-center justify-end space-x-3 px-6 py-4 border-t bg-slate-50 rounded-b-xl sticky bottom-0">
-              <button onClick={() => setShowProductModal(false)} className="px-4 py-2.5 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50">Annuler</button>
-              <button onClick={handleSaveProduct} disabled={savingProduct || !productForm.name.trim() || !productForm.unitPrice} className="px-4 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                {savingProduct ? 'Enregistrement...' : editingProductId ? 'Mettre à jour' : 'Créer'}
-              </button>
+              <div className="flex items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/90 sticky bottom-0 rounded-b-2xl">
+                <button onClick={() => setShowProductModal(false)} className="flex-1 sm:flex-none px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                  Annuler
+                </button>
+                <button onClick={handleSaveProduct} disabled={savingProduct || !productForm.name.trim() || !productForm.unitPrice} className="flex-1 sm:flex-none px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 active:scale-95 transition-all">
+                  {savingProduct ? 'Enregistrement...' : editingProductId ? 'Mettre à jour' : 'Créer'}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </Sidebar>
   );
 }

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Mail, Lock, ArrowRight, AlertCircle } from 'lucide-react';
+import { Mail, Lock, ArrowRight, AlertCircle, Receipt } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { AppwriteException } from 'appwrite';
 
@@ -42,39 +42,56 @@ export default function Login() {
   };
 
   return (
-    <div className="min-h-screen flex">
-      {/* Partie gauche : Image en arrière-plan avec overlay */}
+    <div className="min-h-screen flex bg-slate-50 dark:bg-slate-900 transition-colors">
+      {/* Partie gauche : Image en arrière-plan avec overlay VIOLET */}
       <div className="hidden lg:flex w-1/2 relative overflow-hidden items-center justify-center p-12">
         <img 
           src="https://images.unsplash.com/photo-1581092160562-40aa08e78837?q=80&w=1000&auto=format&fit=crop" 
           alt="Technicien avec tablette" 
           className="absolute inset-0 w-full h-full object-cover"
         />
-        <div className="absolute inset-0 bg-gradient-to-br from-blue-900/90 via-blue-800/85 to-blue-700/80"></div>
+        <div className="absolute inset-0 bg-gradient-to-br from-purple-900/90 via-purple-800/85 to-indigo-700/80"></div>
         
         <div className="relative z-10 text-white max-w-md">
-          <h1 className="text-5xl font-bold mb-6">RelancePro</h1>
-          <p className="text-blue-100 text-xl leading-relaxed mb-8">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-12 h-12 rounded-xl bg-white/20 backdrop-blur-sm flex items-center justify-center">
+              <Receipt size={24} className="text-white" />
+            </div>
+            <h1 className="text-4xl font-bold">RelancePro</h1>
+          </div>
+          <p className="text-purple-100 text-xl leading-relaxed mb-8">
             Ne laissez plus vos devis et vos factures sans réponse. Automatisez vos relances commerciales et récupérez davantage de paiements.
           </p>
-          <div className="flex flex-wrap gap-3 text-blue-200 text-sm">
-            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full">✓ Suivi des prospects</span>
-            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full">✓ Relances automatiques</span>
-            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full">✓ Gestion des factures</span>
+          <div className="flex flex-wrap gap-3 text-purple-200 text-sm">
+            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">✓ Suivi des prospects</span>
+            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">✓ Relances automatiques</span>
+            <span className="bg-white/10 backdrop-blur-sm px-4 py-2 rounded-full border border-white/10">✓ Gestion des factures</span>
           </div>
         </div>
       </div>
 
-      {/* Partie droite : Formulaire */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-8 bg-white">
-        <div className="w-full max-w-md space-y-8">
+      {/* Partie droite : Formulaire avec dark mode */}
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-8">
+        <div className="w-full max-w-md">
+          {/* Logo mobile (visible uniquement sur mobile) */}
+          <div className="lg:hidden flex items-center gap-2 justify-center mb-8">
+            <div className="w-10 h-10 rounded-xl bg-purple-600 flex items-center justify-center">
+              <Receipt size={20} className="text-white" />
+            </div>
+            <span className="text-xl font-bold text-slate-900 dark:text-white">RelancePro</span>
+          </div>
+
           <div className="text-center lg:text-left">
-            <h2 className="text-3xl font-bold text-slate-900">Bon retour parmi nous</h2>
-            <p className="mt-2 text-slate-500">Entrez vos identifiants pour accéder à votre espace.</p>
+            <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 dark:text-white">
+              Bon retour parmi nous
+            </h2>
+            <p className="mt-2 text-slate-500 dark:text-slate-400">
+              Entrez vos identifiants pour accéder à votre espace.
+            </p>
           </div>
 
           {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
+            <div className="mt-6 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg text-sm flex items-start gap-2">
               <AlertCircle size={18} className="mt-0.5 flex-shrink-0" />
               <span>{error}</span>
             </div>
@@ -84,11 +101,11 @@ export default function Login() {
             <div className="space-y-4">
               {/* Champ Email */}
               <div>
-                <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-1">
+                <label htmlFor="email" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
                   Adresse email
                 </label>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
                     <Mail size={18} />
                   </div>
                   <input
@@ -98,7 +115,7 @@ export default function Login() {
                     autoComplete="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none text-slate-900 placeholder-slate-400"
+                    className="block w-full pl-10 pr-3 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:focus:ring-purple-500 dark:focus:border-purple-500 transition-all outline-none text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
                     placeholder="nom@entreprise.com"
                   />
                 </div>
@@ -106,16 +123,19 @@ export default function Login() {
 
               {/* Champ Mot de passe */}
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="password" className="block text-sm font-medium text-slate-700">
+                <div className="flex items-center justify-between mb-1.5">
+                  <label htmlFor="password" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
                     Mot de passe
                   </label>
-                  <Link to="/forgot-password" className="text-sm font-medium text-blue-600 hover:text-blue-500 transition-colors">
+                  <Link 
+                    to="/forgot-password" 
+                    className="text-sm font-medium text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+                  >
                     Mot de passe oublié ?
                   </Link>
                 </div>
                 <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none text-slate-400 dark:text-slate-500">
                     <Lock size={18} />
                   </div>
                   <input
@@ -125,7 +145,7 @@ export default function Login() {
                     autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    className="block w-full pl-10 pr-3 py-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all outline-none text-slate-900 placeholder-slate-400"
+                    className="block w-full pl-10 pr-3 py-3 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-purple-500 dark:focus:ring-purple-500 dark:focus:border-purple-500 transition-all outline-none text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500"
                     placeholder="••••••••"
                   />
                 </div>
@@ -136,7 +156,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-sm text-sm font-semibold text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 dark:focus:ring-offset-slate-900 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed active:scale-[0.98]"
             >
               {loading ? (
                 <>
@@ -155,9 +175,12 @@ export default function Login() {
             </button>
           </form>
 
-          <p className="text-center text-sm text-slate-600">
+          <p className="mt-8 text-center text-sm text-slate-600 dark:text-slate-400">
             Pas encore de compte ?{' '}
-            <Link to="/register" className="font-semibold text-blue-600 hover:text-blue-500 transition-colors">
+            <Link 
+              to="/register" 
+              className="font-semibold text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300 transition-colors"
+            >
               Créer un compte gratuitement
             </Link>
           </p>
@@ -165,4 +188,4 @@ export default function Login() {
       </div>
     </div>
   );
-}    
+}

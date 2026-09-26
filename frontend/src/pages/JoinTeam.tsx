@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { account, databases, teams, DATABASE_ID } from '../appwrite';
 import { ID, Query, Permission, Role } from 'appwrite';
-import { Users, Lock, Mail, User, AlertCircle, CheckCircle, LogIn } from 'lucide-react';
+import { Users, Lock, Mail, User, AlertCircle, CheckCircle, LogIn, ArrowRight } from 'lucide-react';
 
 export default function JoinTeam() {
   const navigate = useNavigate();
@@ -18,8 +18,6 @@ export default function JoinTeam() {
   const [showLoginButton, setShowLoginButton] = useState(false);
   const [teamInfo, setTeamInfo] = useState<{ teamName: string; roleName: string } | null>(null);
   const [memberDocId, setMemberDocId] = useState('');
-  
-  // ✅ NOUVEAU : État pour stocker le teamId à rejoindre
   const [teamIdToJoin, setTeamIdToJoin] = useState('');
 
   const handleVerifyEmail = async (e: React.FormEvent) => {
@@ -29,7 +27,6 @@ export default function JoinTeam() {
     setLoading(true);
 
     try {
-      // 1. Vérifier si l'email a une invitation active
       const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [
         Query.equal('email', email),
         Query.equal('status', 'active')
@@ -45,7 +42,6 @@ export default function JoinTeam() {
       let teamName = "votre équipe";
       let roleName = "membre";
 
-      // 2. Tenter de récupérer les noms (peut échouer en 401/403 si non connecté)
       try {
         const teamRes = await databases.getDocument(DATABASE_ID, 'teams', member.teamId);
         teamName = teamRes.name || teamName;
@@ -63,10 +59,7 @@ export default function JoinTeam() {
       setTeamInfo({ teamName, roleName });
       setMemberDocId(member.$id);
       setName(member.name || '');
-      
-      // ✅ NOUVEAU : Stocker le teamId pour l'ajout à l'équipe Appwrite
       setTeamIdToJoin(member.teamId);
-      
       setStep('register');
     } catch (err: any) {
       console.error("❌ Erreur détaillée lors de la vérification :", err);
@@ -80,21 +73,18 @@ export default function JoinTeam() {
     }
   };
 
-        const handleRegister = async (e: React.FormEvent) => {
+  const handleRegister = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
     setShowLoginButton(false);
     setLoading(true);
 
     try {
-      // 1. Créer le compte Appwrite
       const userResponse = await account.create(ID.unique(), email, password, name);
       const newUserId = userResponse.$id;
 
-      // 2. Créer la session IMMÉDIATEMENT (authentifie l'utilisateur pour la suite)
       await account.createEmailPasswordSession(email, password);
 
-      // 3. Mettre à jour le document team_members avec le userId et les permissions
       await databases.updateDocument(
         DATABASE_ID, 
         'team_members', 
@@ -111,7 +101,6 @@ export default function JoinTeam() {
         ]
       );
 
-            // 4. Rediriger vers le dashboard (méthode forcée pour éviter les blocages React Router)
       console.log("🚀 Redirection vers le dashboard...");
       window.location.href = '/dashboard';
       
@@ -133,50 +122,76 @@ export default function JoinTeam() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 to-blue-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-8">
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center mx-auto mb-4">
-            <Users size={32} className="text-purple-600" />
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center p-4">
+      <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 sm:p-8 animate-fadeIn">
+        
+        {/* INDICATEUR DE PROGRESSION */}
+        <div className="flex items-center justify-center gap-2 mb-6">
+          <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold transition-colors ${
+            step === 'verify' 
+              ? 'bg-purple-600 text-white' 
+              : 'bg-green-500 text-white'
+          }`}>
+            {step === 'verify' ? '1' : <CheckCircle size={16} />}
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">Rejoindre une équipe</h1>
-          <p className="text-sm text-slate-500 mt-2">
+          <div className="w-12 h-0.5 bg-slate-200 dark:bg-slate-700"></div>
+          <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold transition-colors ${
+            step === 'register' 
+              ? 'bg-purple-600 text-white' 
+              : 'bg-slate-200 dark:bg-slate-700 text-slate-400 dark:text-slate-500'
+          }`}>
+            2
+          </div>
+        </div>
+
+        {/* EN-TÊTE */}
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 bg-gradient-to-br from-purple-500 to-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg shadow-purple-500/30">
+            <Users size={32} className="text-white" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
+            {step === 'verify' ? 'Rejoindre une équipe' : 'Créer votre compte'}
+          </h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-2">
             {step === 'verify' 
               ? 'Entrez votre email pour rejoindre votre équipe' 
               : `Rejoignez ${teamInfo?.teamName || 'l\'équipe'}`}
           </p>
         </div>
 
+        {/* MESSAGE D'ERREUR */}
         {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-6">
+          <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-6 animate-fadeIn">
             <div className="flex items-start gap-2">
-              <AlertCircle size={16} className="text-red-600 mt-0.5 flex-shrink-0" />
-              <p className="text-sm text-red-700">{error}</p>
+              <AlertCircle size={18} className="text-red-600 dark:text-red-400 mt-0.5 flex-shrink-0" />
+              <p className="text-sm text-red-700 dark:text-red-300 font-medium">{error}</p>
             </div>
             {showLoginButton && (
               <button
                 onClick={handleGoToLogin}
-                className="mt-3 w-full bg-purple-600 text-white py-2 rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2"
+                className="mt-3 w-full bg-purple-600 text-white py-2.5 rounded-lg text-sm font-medium hover:bg-purple-700 flex items-center justify-center gap-2 active:scale-95 transition-transform"
               >
-                <LogIn size={14} /> Se connecter avec cet email
+                <LogIn size={16} /> Se connecter avec cet email
               </button>
             )}
           </div>
         )}
 
+        {/* ÉTAPE 1 : VÉRIFICATION EMAIL */}
         {step === 'verify' ? (
-          <form onSubmit={handleVerifyEmail} className="space-y-4">
+          <form onSubmit={handleVerifyEmail} className="space-y-5">
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Adresse email</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Adresse email</label>
               <div className="relative">
-                <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Mail size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <input
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="votre@email.com"
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
+                  className="w-full pl-11 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition-shadow"
                   required
+                  autoFocus
                 />
               </div>
             </div>
@@ -184,68 +199,91 @@ export default function JoinTeam() {
             <button
               type="submit"
               disabled={loading || !email}
-              className="w-full bg-purple-600 text-white py-2.5 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-purple-500/30"
             >
-              {loading ? 'Vérification...' : 'Continuer'}
+              {loading ? (
+                <><svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span>Vérification...</span></>
+              ) : (
+                <>Continuer <ArrowRight size={18} /></>
+              )}
             </button>
 
-            <div className="text-center">
+            <div className="text-center pt-2">
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                className="text-sm text-purple-600 hover:underline"
+                className="text-sm text-purple-600 dark:text-purple-400 hover:underline font-medium"
               >
                 Déjà un compte ? Se connecter
               </button>
             </div>
           </form>
         ) : (
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div className="bg-green-50 border border-green-200 rounded-lg p-3 flex items-start gap-2">
-              <CheckCircle size={16} className="text-green-600 mt-0.5 flex-shrink-0" />
-              <div className="text-sm text-green-700">
-                <p className="font-medium">Email vérifié !</p>
+          /* ÉTAPE 2 : CRÉATION DE COMPTE */
+          <form onSubmit={handleRegister} className="space-y-5">
+            <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg p-4 flex items-start gap-3 animate-fadeIn">
+              <CheckCircle size={20} className="text-green-600 dark:text-green-400 mt-0.5 flex-shrink-0" />
+              <div className="text-sm text-green-700 dark:text-green-300">
+                <p className="font-semibold mb-1">Email vérifié !</p>
                 <p>Vous rejoignez <strong>{teamInfo?.teamName}</strong> en tant que <strong>{teamInfo?.roleName}</strong></p>
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Nom complet</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Nom complet</label>
               <div className="relative">
-                <User size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <User size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <input
                   type="text"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
+                  className="w-full pl-11 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition-shadow"
                   required
+                  autoFocus
                 />
               </div>
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Mot de passe</label>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Mot de passe</label>
               <div className="relative">
-                <Lock size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Lock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 dark:text-slate-500" />
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Minimum 8 caractères"
-                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none"
+                  className="w-full pl-11 pr-4 py-3 border border-slate-300 dark:border-slate-600 rounded-lg text-sm focus:ring-2 focus:ring-purple-500 focus:border-transparent outline-none bg-white dark:bg-slate-700 text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 transition-shadow"
                   required
                   minLength={8}
                 />
               </div>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                💡 Utilisez au moins 8 caractères avec des lettres et des chiffres
+              </p>
             </div>
 
             <button
               type="submit"
               disabled={loading || !password}
-              className="w-full bg-purple-600 text-white py-2.5 rounded-lg font-medium hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 text-white py-3 rounded-lg font-semibold hover:from-purple-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all flex items-center justify-center gap-2 active:scale-95 shadow-lg shadow-purple-500/30"
             >
-              {loading ? 'Création du compte...' : 'Créer mon compte et rejoindre'}
+              {loading ? (
+                <><svg className="animate-spin h-5 w-5" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span>Création du compte...</span></>
+              ) : (
+                <>Créer mon compte et rejoindre <ArrowRight size={18} /></>
+              )}
             </button>
+
+            <div className="text-center pt-2">
+              <button
+                type="button"
+                onClick={() => setStep('verify')}
+                className="text-sm text-slate-600 dark:text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 font-medium"
+              >
+                ← Retour
+              </button>
+            </div>
           </form>
         )}
       </div>
