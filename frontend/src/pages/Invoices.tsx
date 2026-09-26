@@ -991,9 +991,24 @@ export default function Invoices() {
     return matchSearch && matchStatus && matchType && matchView;
   });
 
-  const revenueInvoices = invoices.filter(i => 
-    (i.type === 'standard' || i.type === 'advance' || i.type === 'balance') && i.status !== 'cancelled'
-  );
+  // ✅ Identifier les factures d'acompte qui ont été converties en facture finale
+const advanceInvoicesConverted = new Set(
+  invoices
+    .filter(i => i.type === 'standard' && i.originalInvoiceId)
+    .map(i => i.originalInvoiceId)
+);
+
+// ✅ Exclure les factures d'acompte converties (la facture finale prend le relais)
+const revenueInvoices = invoices.filter(i => {
+  if (i.status === 'cancelled') return false;
+  
+  // Si c'est une facture d'acompte convertie en facture finale → l'exclure
+  if (i.type === 'advance' && advanceInvoicesConverted.has(i.$id)) {
+    return false;
+  }
+  
+  return i.type === 'standard' || i.type === 'advance' || i.type === 'balance';
+});
 
   const creditInvoices = invoices.filter(i => i.type === 'credit' && i.status !== 'cancelled');
 
