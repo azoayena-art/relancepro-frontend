@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
+import { Query, ID as AppwriteID, Permission, Role } from 'appwrite'; // <-- AJOUTER Permission et Role
 import { useParams, useNavigate } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
-import { Query, ID as AppwriteID } from 'appwrite';
 import { Building2, CheckCircle2, AlertCircle, Send } from 'lucide-react';
 
 export default function PublicRequest() {
@@ -43,7 +43,7 @@ export default function PublicRequest() {
     if (slug) fetchCompany();
   }, [slug]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+        const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rgpdAccepted) {
       setError('Vous devez accepter les conditions pour être recontacté.');
@@ -54,24 +54,31 @@ export default function PublicRequest() {
       return;
     }
 
+    if (!company || !company.teamId) {
+      setError("Configuration de l'entreprise invalide (teamId manquant).");
+      return;
+    }
+
     setSubmitting(true);
     setError('');
 
     try {
-      // ✅ ÉTAPE 1 : Vérifier si un prospect existe déjà avec cet email ou ce téléphone
-      // CORRECTION : On filtre par 'teamId' pour correspondre à la logique de la page Prospects
       let existingProspect = null;
+      
+      // Vérification des doublons (ignorée si non autorisé)
       if (form.email || form.phone) {
-        const response = await databases.listDocuments(DATABASE_ID, 'prospects', [
-          Query.equal('teamId', company.teamId) 
-        ]);
-        
-        existingProspect = response.documents.find((p: any) => 
-          (form.email && p.email === form.email) || (form.phone && p.phone === form.phone)
-        );
+        try {
+          const response = await databases.listDocuments(DATABASE_ID, 'prospects', [
+            Query.equal('teamId', company.teamId) 
+          ]);
+          existingProspect = response.documents.find((p: any) => 
+            (form.email && p.email === form.email) || (form.phone && p.phone === form.phone)
+          );
+        } catch (checkErr) {
+          console.warn("⚠️ Vérification des doublons ignorée.");
+        }
       }
 
-      // ✅ ÉTAPE 2 : Mise à jour intelligente (on écrase seulement les cases remplies)
       if (existingProspect) {
         const newData = {
           firstName: form.firstName || existingProspect.firstName,
@@ -84,13 +91,12 @@ export default function PublicRequest() {
             : existingProspect.needs,
           source: 'website',
           status: 'new',
-          teamId: company.teamId // ✅ CORRECTION : Utiliser teamId au lieu de user
+          teamId: company.teamId
         };
 
         await databases.updateDocument(DATABASE_ID, 'prospects', existingProspect.$id, newData);
-        console.log('✅ Prospect existant mis à jour intelligemment.');
+        console.log('✅ Prospect existant mis à jour.');
       } else {
-        // ✅ ÉTAPE 3 : Création d'un nouveau prospect si aucun doublon
         const newData = {
           firstName: form.firstName,
           lastName: form.lastName,
@@ -100,17 +106,26 @@ export default function PublicRequest() {
           needs: form.needs,
           source: 'website',
           status: 'new',
-          teamId: company.teamId // ✅ CORRECTION : Utiliser teamId au lieu de user
+          teamId: company.teamId
         };
 
-        await databases.createDocument(DATABASE_ID, 'prospects', AppwriteID.unique(), newData);
-        console.log('✅ Nouveau prospect créé.');
+        // ✅ CRUCIAL : Ne passer AUCUNE permission (undefined)
+        // Les permissions de la collection gèrent déjà l'accès
+        await databases.createDocument(
+          DATABASE_ID, 
+          'prospects', 
+          AppwriteID.unique(), 
+          newData
+          // Pas de 5ème argument = pas de permissions personnalisées
+        );
+        console.log('✅ Nouveau prospect créé avec teamId:', company.teamId);
       }
 
       setSuccess(true);
     } catch (err: any) {
       console.error('❌ Erreur détaillée Appwrite:', err);
-      setError('Une erreur est survenue. Veuillez réessayer ou contacter l\'artisan par téléphone.');
+      const vraiMessage = err.message || err.response?.message || JSON.stringify(err);
+      setError(`Erreur : ${vraiMessage}`);
     } finally {
       setSubmitting(false);
     }

@@ -1,12 +1,41 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
+import { useCompanySettings } from '../hooks/useCompanySettings';
 import Sidebar from '../components/Sidebar';
+import { toast } from 'sonner';
+import Modal from '../components/ui/Modal';
+import ActionMenu, { ActionMenuItem } from '../components/ui/ActionMenu';
 import {
-  Plus, Search, Edit2, X, Phone, Mail, Building,
-  UserCheck, Filter, FileText, AlertCircle, Archive, RotateCcw, Hash, Eye
+  PageHeader,
+  TypeTabs,
+  KPIGrid,
+  StatCell,
+  EmptyState,
+  Avatar,
+  StatusIndicator,
+  TypeLabel,
+  SkeletonRow,
+  SkeletonCard,
+  ConfirmDialog,
+  FormField,
+  Input,
+  Select,
+  Textarea,
+  Alert,
+  Pagination,
+  ViewTabs,
+  SearchFilter,
+  SelectFilter,
+  MobileCard,
+  DataTable,
+  type Entity,
+} from '../components/ui/SharedUI';
+import {
+  Plus, Edit2, Phone, Mail, Building,
+  UserCheck, FileText, AlertCircle, Archive, RotateCcw, Hash, Eye, User
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 
@@ -30,21 +59,10 @@ interface Client {
   $createdAt?: string;
 }
 
-const statusColors: Record<string, string> = {
-  active: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  inactive: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  archived: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-};
-
 const statusLabels: Record<string, string> = {
   active: 'Actif',
   inactive: 'Inactif',
   archived: 'Archivé'
-};
-
-const typeLabels: Record<string, string> = {
-  particulier: 'Particulier',
-  entreprise: 'Entreprise'
 };
 
 const emptyForm = {
@@ -66,6 +84,7 @@ export default function Clients() {
   const { hasPermission, loading: permLoading } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { currency, currencyConfig, loading: settingsLoading } = useCompanySettings();
 
   const [clients, setClients] = useState<Client[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,17 +92,34 @@ export default function Clients() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [search, setSearch] = useState('');
-  const [filterType, setFilterType] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [filterType, setFilterType] = useState('all');
   const [saving, setSaving] = useState(false);
   const [duplicateFound, setDuplicateFound] = useState<Client | null>(null);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
+  const [clientToArchive, setClientToArchive] = useState<Client | null>(null);
+  const [activeStat, setActiveStat] = useState(0);
+  
+  // Pagination
+  const [currentPage, setCurrentPage] = useState(1);
+  const [itemsPerPage] = useState(10);
+  
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (!permLoading && !hasPermission('clients.view')) {
-      navigate('/dashboard');
-    }
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
+
+  useEffect(() => {
+    if (!permLoading && !hasPermission('clients.view')) navigate('/dashboard');
   }, [permLoading, hasPermission, navigate]);
 
   useEffect(() => {
@@ -97,7 +133,7 @@ export default function Clients() {
       const clientToEdit = clients.find(c => c.$id === editId);
       if (clientToEdit) {
         if (clientToEdit.teamId !== currentTeamId) {
-          alert('⚠️ Accès refusé : Ce client n\'appartient pas à votre équipe.');
+          toast.error('Accès refusé', { description: "Ce client n'appartient pas à votre équipe." });
           setSearchParams({}, { replace: true });
           return;
         }
@@ -122,6 +158,11 @@ export default function Clients() {
     }
   }, [searchParams, clients, showModal, currentTeamId]);
 
+  // Reset pagination quand les filtres changent
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterStatus, filterType, viewMode]);
+
   const loadClients = async () => {
     try {
       setLoading(true);
@@ -132,10 +173,8 @@ export default function Clients() {
         const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
-
       if (!teamId) { setLoading(false); return; }
       setCurrentTeamId(teamId);
-
       const response = await databases.listDocuments(
         DATABASE_ID, 'clients',
         [Query.equal('teamId', teamId), Query.orderDesc('$createdAt'), Query.limit(2000)]
@@ -143,6 +182,7 @@ export default function Clients() {
       setClients(response.documents as unknown as Client[]);
     } catch (error) {
       console.error('Erreur chargement clients:', error);
+      toast.error('Erreur de chargement des clients');
     } finally {
       setLoading(false);
     }
@@ -190,7 +230,7 @@ export default function Clients() {
 
   const handleOpenEdit = (client: Client) => {
     if (client.teamId !== currentTeamId) {
-      alert('⚠️ Accès refusé : Ce client n\'appartient pas à votre équipe.');
+      toast.error('Accès refusé', { description: "Ce client n'appartient pas à votre équipe." });
       return;
     }
     setEditingId(client.$id);
@@ -213,33 +253,30 @@ export default function Clients() {
 
   const handleSave = async () => {
     if (!form.firstName && !form.lastName && !form.companyName) {
-      alert('Veuillez remplir au moins le nom, le prénom ou le nom de l\'entreprise.');
+      toast.error('Champs requis', { description: 'Veuillez remplir au moins le nom, le prénom ou le nom de l\'entreprise.' });
       return;
     }
     if (!currentTeamId) return;
-
     if (!editingId && !duplicateFound) {
       const existing = await checkDuplicate();
       if (existing) { setDuplicateFound(existing as unknown as Client); return; }
     }
-
     setSaving(true);
     try {
       const data: any = { ...form, teamId: currentTeamId, userId: user.$id };
-      
       if (!editingId) {
         data.clientId = await getNextClientNumber();
       } else {
         const existingDoc = await databases.getDocument(DATABASE_ID, 'clients', editingId);
         if (existingDoc.teamId !== currentTeamId) {
-          alert('⚠️ Accès refusé : Ce client n\'appartient pas à votre équipe.');
+          toast.error('Accès refusé');
           setSaving(false);
           return;
         }
       }
-      
       if (editingId) {
         await databases.updateDocument(DATABASE_ID, 'clients', editingId, data);
+        toast.success('Client mis à jour', { description: `${form.firstName} ${form.lastName}`.trim() });
       } else {
         let perms: string[] = [];
         if (user?.secureTeamId) {
@@ -256,38 +293,42 @@ export default function Clients() {
           ];
         }
         await databases.createDocument(DATABASE_ID, 'clients', ID.unique(), data, perms);
+        toast.success('Client ajouté', { description: `N° ${data.clientId}` });
       }
       setShowModal(false);
       setDuplicateFound(null);
       await loadClients();
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleArchive = async (id: string, name: string) => {
-    if (!confirm(`Archiver le client "${name}" ?\nIl sera masqué de la liste principale mais son historique sera conservé.`)) return;
+  const handleArchive = async () => {
+    if (!clientToArchive) return;
     try {
-      const doc = await databases.getDocument(DATABASE_ID, 'clients', id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
-      await databases.updateDocument(DATABASE_ID, 'clients', id, { status: 'archived' });
+      const doc = await databases.getDocument(DATABASE_ID, 'clients', clientToArchive.$id);
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
+      await databases.updateDocument(DATABASE_ID, 'clients', clientToArchive.$id, { status: 'archived' });
+      toast.success('Client archivé', { description: `${clientToArchive.firstName} ${clientToArchive.lastName}`.trim() });
+      setClientToArchive(null);
       await loadClients();
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     }
   };
 
   const handleUnarchive = async (id: string, name: string) => {
     try {
       const doc = await databases.getDocument(DATABASE_ID, 'clients', id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
       await databases.updateDocument(DATABASE_ID, 'clients', id, { status: 'active' });
+      toast.success('Client désarchivé', { description: name });
       await loadClients();
       setViewMode('active');
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     }
   };
 
@@ -299,338 +340,453 @@ export default function Clients() {
     return matchSearch && matchType && matchStatus && matchView;
   });
 
-  if (permLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
+  // Calculs de pagination
+  const totalPages = Math.ceil(filtered.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedClients = filtered.slice(startIndex, endIndex);
+
+  const handlePageChange = (page: number) => {
+    setCurrentPage(page);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const typeTabs = [
+    { key: 'all', label: 'Tous', count: filtered.length },
+    { key: 'particulier', label: 'Particuliers', count: clients.filter(c => c.status !== 'archived' && c.type === 'particulier').length },
+    { key: 'entreprise', label: 'Entreprises', count: clients.filter(c => c.status !== 'archived' && c.type === 'entreprise').length },
+  ];
+
+  const totalClients = clients.filter(c => c.status !== 'archived').length;
+  const totalEntreprises = clients.filter(c => c.status !== 'archived' && c.type === 'entreprise').length;
+  const totalParticuliers = clients.filter(c => c.status !== 'archived' && c.type === 'particulier').length;
+  const totalArchives = clients.filter(c => c.status === 'archived').length;
+
+  const now = new Date();
+  const prevMonthRef = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const isThisMonth = (d?: string) => {
+    if (!d) return false;
+    const dt = new Date(d);
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  };
+  const isPrevMonth = (d?: string) => {
+    if (!d) return false;
+    const dt = new Date(d);
+    return dt.getMonth() === prevMonthRef.getMonth() && dt.getFullYear() === prevMonthRef.getFullYear();
+  };
+  const calcTrend = (pred: (c: Client) => boolean) => {
+    const cur = clients.filter(c => pred(c) && isThisMonth(c.$createdAt)).length;
+    const prev = clients.filter(c => pred(c) && isPrevMonth(c.$createdAt)).length;
+    if (prev === 0) return cur > 0 ? 100 : 0;
+    return Math.round(((cur - prev) / prev) * 1000) / 10;
+  };
+
+  const trendTotal = calcTrend(c => c.status !== 'archived');
+  const trendEntreprises = calcTrend(c => c.status !== 'archived' && c.type === 'entreprise');
+  const trendParticuliers = calcTrend(c => c.status !== 'archived' && c.type === 'particulier');
+  const trendArchives = calcTrend(c => c.status === 'archived');
+
+  const getEntity = (c: Client): Entity => ({
+    type: c.type === 'entreprise' ? 'entreprise' : 'particulier',
+    firstName: c.firstName,
+    lastName: c.lastName,
+    companyName: c.companyName,
+    email: c.email,
+    phone: c.phone
+  });
+
+  const statusOptions = [
+    { value: 'all', label: 'Tous statuts' },
+    { value: 'active', label: 'Actif' },
+    { value: 'inactive', label: 'Inactif' }
+  ];
+
+  if (permLoading || settingsLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
   if (!hasPermission('clients.view')) return null;
 
   return (
     <Sidebar>
       <div className="min-h-full bg-slate-50 dark:bg-slate-900">
-        {/* HEADER STICKY */}
-        <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <UserCheck size={24} className="text-purple-600" />
-                    Clients
-                  </h1>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{filtered.length} résultat(s) {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}</p>
-                </div>
-              </div>
-              {viewMode === 'active' && hasPermission('clients.create') && (
-                <button onClick={handleOpenAdd} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm shadow-sm active:scale-95">
-                  <Plus size={18} /><span>Nouveau client</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </header>
+        <PageHeader
+          icon={UserCheck}
+          title="Clients"
+          description={
+            <>
+              <span className="font-semibold text-slate-700 dark:text-slate-300 tabular-nums">
+                {filtered.length}
+              </span>{' '}
+              résultat(s) {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}
+            </>
+          }
+          currency={currency || 'EUR'}
+          currencySymbol={currencyConfig?.symbol || '€'}
+          action={
+            viewMode === 'active' && hasPermission('clients.create') ? (
+              <button
+                onClick={handleOpenAdd}
+                className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2.5 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all font-medium text-sm shadow-lg shadow-purple-500/30 active:scale-95"
+              >
+                <Plus size={18} />
+                <span>Nouveau client</span>
+              </button>
+            ) : null
+          }
+        />
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          {/* ONGLETS */}
-          <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
-            <button onClick={() => setViewMode('active')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              Actifs ({clients.filter(c => c.status !== 'archived').length})
-            </button>
-            <button onClick={() => setViewMode('archived')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              Archivés ({clients.filter(c => c.status === 'archived').length})
-            </button>
-          </div>
+          <KPIGrid columns={4}>
+            <StatCell value={totalClients} trend={trendTotal} label="Clients actifs" active={activeStat === 0} onClick={() => setActiveStat(0)} />
+            <StatCell value={totalEntreprises} trend={trendEntreprises} label="Entreprises" active={activeStat === 1} onClick={() => setActiveStat(1)} />
+            <StatCell value={totalParticuliers} trend={trendParticuliers} label="Particuliers" active={activeStat === 2} onClick={() => setActiveStat(2)} />
+            <StatCell value={totalArchives} trend={trendArchives} label="Archivés" active={activeStat === 3} onClick={() => setActiveStat(3)} />
+          </KPIGrid>
 
-          {/* BARRE DE RECHERCHE ET FILTRES */}
+          {viewMode === 'active' && (
+            <TypeTabs
+              tabs={typeTabs}
+              activeTab={filterType}
+              onTabChange={setFilterType}
+              color="purple"
+            />
+          )}
+
+          <ViewTabs
+            active={viewMode}
+            onChange={setViewMode}
+            counts={{
+              active: clients.filter(c => c.status !== 'archived').length,
+              archived: totalArchives
+            }}
+            color="purple"
+          />
+
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
-            <div className="relative flex-1">
-              <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input type="text" placeholder="Rechercher (nom, entreprise, n° client...)" value={search} onChange={(e) => setSearch(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm transition-shadow" />
-            </div>
+            <SearchFilter
+              value={search}
+              onChange={setSearch}
+              placeholder="Rechercher (nom, entreprise, n° client...)"
+              shortcut="⌘K"
+              inputRef={searchInputRef}
+            />
             {viewMode === 'active' && (
-              <div className="flex gap-3">
-                <div className="relative sm:w-40 flex-1">
-                  <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none">
-                    <option value="all">Tous statuts</option>
-                    <option value="active">Actif</option>
-                    <option value="inactive">Inactif</option>
-                  </select>
-                </div>
-                <div className="relative sm:w-40 flex-1">
-                  <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <select value={filterType} onChange={(e) => setFilterType(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none">
-                    <option value="all">Tous types</option>
-                    <option value="particulier">Particulier</option>
-                    <option value="entreprise">Entreprise</option>
-                  </select>
-                </div>
-              </div>
+              <SelectFilter
+                value={filterStatus}
+                onChange={setFilterStatus}
+                options={statusOptions}
+                placeholder="Tous statuts"
+              />
             )}
           </div>
 
-          {/* CONTENU : TABLEAU DESKTOP / CARTES MOBILE */}
           {loading ? (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400 animate-pulse">Chargement des données...</div>
+            <>
+              <DataTable loading={true} headers={[
+                { label: 'N° Client', align: 'left' },
+                { label: 'Client', align: 'left' },
+                { label: 'Contact', align: 'left' },
+                { label: 'Type', align: 'left' },
+                { label: 'Statut', align: 'left' },
+                { label: '', align: 'right', width: 'w-12' }
+              ]} />
+              <div className="md:hidden space-y-4 mt-4">
+                <SkeletonCard /><SkeletonCard /><SkeletonCard />
+              </div>
+            </>
           ) : filtered.length === 0 ? (
-            <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center shadow-sm">
-              <UserCheck size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
-              <h3 className="text-lg font-semibold text-slate-700 dark:text-slate-300 mb-2">Aucun client {viewMode === 'active' ? 'actif' : 'archivé'}</h3>
-              {viewMode === 'active' && hasPermission('clients.create') && (
-                <button onClick={handleOpenAdd} className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm mt-4 active:scale-95 transition-transform">
-                  <Plus size={16} /><span>Ajouter un client</span>
-                </button>
-              )}
-            </div>
+            <EmptyState
+              icon={UserCheck}
+              title={`Aucun client ${viewMode === 'active' ? 'actif' : 'archivé'}`}
+              description="Commencez par ajouter un nouveau client."
+              tone="indigo"
+              action={
+                viewMode === 'active' && hasPermission('clients.create') ? (
+                  <button onClick={handleOpenAdd} className="inline-flex items-center gap-2 bg-purple-600 text-white px-4 py-2 rounded-lg hover:bg-purple-700 text-sm mt-4 active:scale-95 transition-transform">
+                    <Plus size={16} /><span>Ajouter un client</span>
+                  </button>
+                ) : null
+              }
+            />
           ) : (
             <>
-              {/* VERSION DESKTOP (Tableau) */}
-              <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
-                  <table className="w-full">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                      <tr>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">N° Client</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Nom / Entreprise</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Contact</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Type</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Statut</th>
-                        <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {filtered.map((c) => (
-                        <tr key={c.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                          <td className="px-6 py-4">
-                            <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-2 py-1 rounded">
-                              <Hash size={12} />
-                              {c.clientId || '—'}
-                            </span>
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="font-medium text-slate-900 dark:text-white">{c.firstName} {c.lastName}</div>
-                            {c.companyName && <div className="text-sm text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-1"><Building size={12} /> {c.companyName}</div>}
-                          </td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col space-y-1.5">
-                              {c.email && <span className="flex items-center text-sm text-slate-600 dark:text-slate-300"><Mail size={14} className="mr-2 text-slate-400" />{c.email}</span>}
-                              {c.phone && <span className="flex items-center text-sm text-slate-600 dark:text-slate-300"><Phone size={14} className="mr-2 text-slate-400" />{c.phone}</span>}
-                            </div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{typeLabels[c.type] || c.type}</td>
-                          <td className="px-6 py-4">
-                            <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[c.status]}`}>{statusLabels[c.status] || c.status}</span>
-                          </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {viewMode === 'active' ? (
-                                <>
-                                  <button onClick={() => navigate(`/clients/${c.$id}`)} className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-lg transition-colors" title="Voir la fiche"><Eye size={16} /></button>
-                                  {hasPermission('quotes.create') && (
-                                    <button onClick={() => navigate(`/quotes?clientId=${c.$id}`)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors" title="Créer un devis"><FileText size={16} /></button>
-                                  )}
-                                  {hasPermission('clients.edit') && (
-                                    <button onClick={() => handleOpenEdit(c)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier"><Edit2 size={16} /></button>
-                                  )}
-                                  {hasPermission('clients.delete') && (
-                                    <button onClick={() => handleArchive(c.$id, `${c.firstName} ${c.lastName}`)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors" title="Archiver"><Archive size={16} /></button>
-                                  )}
-                                </>
-                              ) : (
-                                <button onClick={() => handleUnarchive(c.$id, `${c.firstName} ${c.lastName}`)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors">
-                                  <RotateCcw size={14} /><span>Désarchiver</span>
-                                </button>
-                              )}
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-
-              {/* VERSION MOBILE (Cartes) */}
-              <div className="md:hidden space-y-4">
-                {filtered.map((c) => (
-                  <div key={c.$id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-semibold text-slate-900 dark:text-white">{c.firstName} {c.lastName}</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">{c.companyName || 'Particulier'}</p>
-                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-semibold text-purple-700 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 px-1.5 py-0.5 rounded mt-1">
-                          <Hash size={10} /> {c.clientId || 'N/A'}
-                        </span>
-                      </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[c.status]}`}>
-                        {statusLabels[c.status]}
+              {/* Desktop */}
+              <DataTable headers={[
+                { label: 'N° Client', align: 'left' },
+                { label: 'Client', align: 'left' },
+                { label: 'Contact', align: 'left' },
+                { label: 'Type', align: 'left' },
+                { label: 'Statut', align: 'left' },
+                { label: '', align: 'right', width: 'w-12' }
+              ]}>
+                {paginatedClients.map((c) => (
+                  <tr key={c.$id} className="group hover:bg-purple-50/50 dark:hover:bg-slate-700/30 transition-colors duration-200">
+                    <td className="px-6 py-4">
+                      <span className="text-xs font-mono font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+                        {c.clientId || '—'}
                       </span>
-                    </div>
-                    
-                    <div className="space-y-2 mb-4 text-sm">
-                      {c.phone && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Phone size={14} className="text-slate-400" /> {c.phone}</div>}
-                      {c.email && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Mail size={14} className="text-slate-400" /> {c.email}</div>}
-                      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                        <Building size={14} className="text-slate-400" /> {typeLabels[c.type] || c.type}
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex items-center gap-3">
+                        <Avatar client={getEntity(c)} />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">
+                            {c.type === 'entreprise' ? c.companyName : `${c.firstName} ${c.lastName}`.trim()}
+                          </div>
+                          {c.type === 'entreprise' && c.firstName && (
+                            <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5 truncate">
+                              <User size={11} /> {c.firstName} {c.lastName}
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col space-y-1">
+                        {c.email && <span className="flex items-center text-xs text-slate-600 dark:text-slate-300 truncate max-w-[200px]"><Mail size={13} className="mr-1.5 text-slate-400 flex-shrink-0" />{c.email}</span>}
+                        {c.phone && <span className="flex items-center text-xs text-slate-600 dark:text-slate-300 tabular-nums"><Phone size={13} className="mr-1.5 text-slate-400" />{c.phone}</span>}
+                        {!c.email && !c.phone && <span className="text-xs text-slate-400 italic">Non renseigné</span>}
+                      </div>
+                    </td>
+                    <td className="px-6 py-4">
+                      <TypeLabel type={c.type} />
+                    </td>
+                    <td className="px-6 py-4">
+                      <StatusIndicator status={c.status} />
+                    </td>
+                    <td className="px-2 py-4 text-right w-12">
+                      <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                        <ActionMenu>
+                          {viewMode === 'active' ? (
+                            <>
+                              <ActionMenuItem onClick={() => navigate(`/clients/${c.$id}`)} icon={Eye} label="Voir la fiche" />
+                              {hasPermission('quotes.create') && (
+                                <ActionMenuItem onClick={() => navigate(`/quotes?clientId=${c.$id}`)} icon={FileText} label="Créer un devis" />
+                              )}
+                              {hasPermission('clients.edit') && (
+                                <ActionMenuItem onClick={() => handleOpenEdit(c)} icon={Edit2} label="Modifier" />
+                              )}
+                              {hasPermission('clients.delete') && (
+                                <ActionMenuItem onClick={() => setClientToArchive(c)} icon={Archive} label="Archiver" danger />
+                              )}
+                            </>
+                          ) : (
+                            <ActionMenuItem onClick={() => handleUnarchive(c.$id, `${c.firstName} ${c.lastName}`.trim())} icon={RotateCcw} label="Désarchiver" />
+                          )}
+                        </ActionMenu>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </DataTable>
 
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+              {/* Mobile */}
+              <div className="md:hidden space-y-4 mt-4">
+                {paginatedClients.map((c) => (
+                  <MobileCard key={c.$id}>
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <Avatar client={getEntity(c)} size="lg" />
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-slate-900 dark:text-white truncate text-base">{c.type === 'entreprise' ? c.companyName : `${c.firstName} ${c.lastName}`.trim()}</h3>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[11px] font-mono font-medium text-slate-500 dark:text-slate-400 tabular-nums">{c.clientId || 'N/A'}</span>
+                            <span className="text-slate-300 dark:text-slate-600">•</span>
+                            <TypeLabel type={c.type} />
+                          </div>
+                        </div>
+                      </div>
+                      <StatusIndicator status={c.status} />
+                    </div>
+                    <div className="space-y-2 mb-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 border border-slate-100 dark:border-slate-700/50">
+                      {c.phone && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm tabular-nums"><Phone size={14} className="text-slate-400" /> {c.phone}</div>}
+                      {c.email && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm truncate"><Mail size={14} className="text-slate-400 flex-shrink-0" /> <span className="truncate">{c.email}</span></div>}
+                      {!c.phone && !c.email && <div className="text-xs text-slate-400 italic text-center py-1">Aucun contact renseigné</div>}
+                    </div>
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-2">
                       {viewMode === 'active' ? (
-                        <div className="grid grid-cols-4 gap-2">
-                          <button onClick={() => navigate(`/clients/${c.$id}`)} className="flex flex-col items-center justify-center p-2 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-lg active:scale-95 transition-transform">
-                            <Eye size={18} />
-                            <span className="text-[10px] mt-1 font-medium">Voir</span>
+                        <div className="flex items-center gap-2 flex-1">
+                          <button onClick={() => navigate(`/clients/${c.$id}`)} className="flex-1 flex items-center justify-center gap-1.5 p-2.5 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-lg active:scale-95 transition-transform text-xs font-medium">
+                            <Eye size={16} /> Voir
                           </button>
                           {hasPermission('quotes.create') && (
-                            <button onClick={() => navigate(`/quotes?clientId=${c.$id}`)} className="flex flex-col items-center justify-center p-2 text-green-600 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
-                              <FileText size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Devis</span>
-                            </button>
-                          )}
-                          {hasPermission('clients.edit') && (
-                            <button onClick={() => handleOpenEdit(c)} className="flex flex-col items-center justify-center p-2 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
-                              <Edit2 size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Modifier</span>
-                            </button>
-                          )}
-                          {hasPermission('clients.delete') && (
-                            <button onClick={() => handleArchive(c.$id, `${c.firstName} ${c.lastName}`)} className="flex flex-col items-center justify-center p-2 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">
-                              <Archive size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Archiver</span>
+                            <button onClick={() => navigate(`/quotes?clientId=${c.$id}`)} className="flex-1 flex items-center justify-center gap-1.5 p-2.5 text-green-600 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform text-xs font-medium">
+                              <FileText size={16} /> Devis
                             </button>
                           )}
                         </div>
                       ) : (
-                        <button onClick={() => handleUnarchive(c.$id, `${c.firstName} ${c.lastName}`)} className="w-full flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
+                        <button onClick={() => handleUnarchive(c.$id, `${c.firstName} ${c.lastName}`.trim())} className="w-full flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
                           <RotateCcw size={16} /><span>Désarchiver</span>
                         </button>
                       )}
+                      {viewMode === 'active' && (
+                        <ActionMenu>
+                          {hasPermission('clients.edit') && (
+                            <ActionMenuItem onClick={() => handleOpenEdit(c)} icon={Edit2} label="Modifier" />
+                          )}
+                          {hasPermission('clients.delete') && (
+                            <ActionMenuItem onClick={() => setClientToArchive(c)} icon={Archive} label="Archiver" danger />
+                          )}
+                        </ActionMenu>
+                      )}
                     </div>
-                  </div>
+                  </MobileCard>
                 ))}
               </div>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <Pagination
+                  currentPage={currentPage}
+                  totalPages={totalPages}
+                  onPageChange={handlePageChange}
+                  startItem={startIndex + 1}
+                  endItem={Math.min(endIndex, filtered.length)}
+                  totalItems={filtered.length}
+                  itemName="client"
+                />
+              )}
             </>
           )}
         </main>
 
-        {/* MODAL OPTIMISÉE MOBILE */}
-        {showModal && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
-            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto animate-slideUp">
-              <div className="sticky top-0 bg-white dark:bg-slate-800 z-10 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">{editingId ? 'Modifier le client' : 'Nouveau client'}</h2>
-                <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
-                  <X size={20} className="text-slate-500 dark:text-slate-400" />
-                </button>
+        <Modal
+          open={showModal}
+          onClose={() => { setShowModal(false); setDuplicateFound(null); }}
+          title={editingId ? 'Modifier le client' : 'Nouveau client'}
+          icon={<UserCheck size={20} className="text-purple-600" />}
+          maxWidth="sm:max-w-2xl"
+          footer={
+            <>
+              <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
+              <button onClick={handleSave} disabled={saving || (!form.firstName && !form.lastName && !form.companyName)} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20">
+                {saving ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Enregistrement...</> : (editingId ? 'Mettre à jour' : 'Ajouter')}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-5">
+            {duplicateFound && !editingId && (
+              <Alert tone="warning" icon={AlertCircle} title="Doublon détecté">
+                <p className="text-sm mt-1">Un client avec ces coordonnées existe déjà.</p>
+                <div className="flex gap-2 mt-3">
+                  <button type="button" onClick={() => { handleOpenEdit(duplicateFound); }} className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 active:scale-95 transition-transform shadow-sm">Mettre à jour</button>
+                  <button type="button" onClick={() => setDuplicateFound(null)} className="px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform">Créer quand même</button>
+                </div>
+              </Alert>
+            )}
+
+            {!editingId && (
+              <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center gap-3">
+                <div className="flex-shrink-0 w-9 h-9 bg-purple-50 dark:bg-purple-500/10 ring-1 ring-inset ring-purple-100 dark:ring-purple-500/20 rounded-lg flex items-center justify-center">
+                  <Hash size={15} className="text-purple-600 dark:text-purple-400" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Numéro client</p>
+                  <p className="text-sm font-medium text-slate-700 dark:text-slate-200 mt-0.5">Attribué automatiquement à l'enregistrement</p>
+                </div>
+                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 rounded-full">Auto</span>
               </div>
-              
-              <div className="px-4 sm:px-6 py-4 space-y-4">
-                {duplicateFound && !editingId && (
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-lg">
-                    <p className="font-semibold flex items-center gap-2 text-sm"><AlertCircle size={16} /> Doublon détecté</p>
-                    <p className="text-sm mt-1">Un client avec ces coordonnées existe déjà.</p>
-                    <div className="flex gap-2 mt-3">
-                      <button type="button" onClick={() => { handleOpenEdit(duplicateFound); }} className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 active:scale-95 transition-transform">Mettre à jour</button>
-                      <button type="button" onClick={() => setDuplicateFound(null)} className="px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform">Créer quand même</button>
-                    </div>
-                  </div>
-                )}
+            )}
 
-                {!editingId && (
-                  <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3 flex items-center gap-2">
-                    <Hash size={16} className="text-purple-600 dark:text-purple-400" />
-                    <div>
-                      <p className="text-xs text-purple-700 dark:text-purple-300 font-medium">Numéro client</p>
-                      <p className="text-sm font-mono font-semibold text-purple-900 dark:text-purple-100">Attribué automatiquement à l'enregistrement</p>
-                    </div>
-                  </div>
-                )}
-                {editingId && (
-                  <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg p-3 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Hash size={16} className="text-slate-500 dark:text-slate-400" />
-                      <div>
-                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Numéro client</p>
-                        <p className="text-sm font-mono font-semibold text-slate-900 dark:text-white">
-                          {clients.find(c => c.$id === editingId)?.clientId || 'Non attribué'}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Type</label>
-                    <select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
-                      <option value="particulier">Particulier</option>
-                      <option value="entreprise">Entreprise</option>
-                    </select>
+            {editingId && (
+              <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 bg-slate-100 dark:bg-slate-700/60 rounded-lg flex items-center justify-center">
+                    <Hash size={15} className="text-slate-500 dark:text-slate-400" />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Statut</label>
-                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
-                      {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
-                    </select>
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-400 dark:text-slate-500">Numéro client</p>
+                    <p className="text-base font-mono font-semibold text-slate-800 dark:text-slate-100 tabular-nums mt-0.5">
+                      {clients.find(c => c.$id === editingId)?.clientId || 'Non attribué'}
+                    </p>
                   </div>
                 </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Prénom</label>
-                    <input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Jean" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Nom</label>
-                    <input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Dupont" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Building size={14} />Entreprise</label>
-                  <input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Dupont Plomberie" />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Mail size={14} />Email</label>
-                    <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="jean@dupont.fr" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Phone size={14} />Téléphone</label>
-                    <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="06 12 34 56 78" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Adresse</label>
-                  <input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="123 rue de la Paix, 75000 Paris" />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Adresse de facturation</label>
-                    <input type="text" value={form.billingAddress} onChange={(e) => setForm({ ...form, billingAddress: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Adresse de facturation" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Numéro fiscal / TVA</label>
-                    <input type="text" value={form.taxNumber} onChange={(e) => setForm({ ...form, taxNumber: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="FR12345678901" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Notes</label>
-                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none" placeholder="Notes internes..." />
-                </div>
+                <span className="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 border border-slate-200 dark:border-slate-700 rounded-full">Existant</span>
               </div>
+            )}
 
-              <div className="sticky bottom-0 bg-slate-50 dark:bg-slate-800/90 backdrop-blur-sm flex items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-700 rounded-b-2xl">
-                <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="flex-1 sm:flex-none px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
-                <button onClick={handleSave} disabled={saving || (!form.firstName && !form.lastName && !form.companyName)} className="flex-1 sm:flex-none px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all">
-                  {saving ? 'Enregistrement...' : (editingId ? 'Mettre à jour' : 'Ajouter')}
-                </button>
-              </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label="Type">
+                <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
+                  <option value="particulier">Particulier</option>
+                  <option value="entreprise">Entreprise</option>
+                </Select>
+              </FormField>
+              <FormField label="Statut">
+                <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </Select>
+              </FormField>
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label="Prénom">
+                <Input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Jean" />
+              </FormField>
+              <FormField label="Nom">
+                <Input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Dupont" />
+              </FormField>
+            </div>
+
+            <FormField label="Entreprise" hint="Laisser vide si particulier">
+              <div className="relative">
+                <Building size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <Input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="pl-9" placeholder="Dupont Plomberie" />
+              </div>
+            </FormField>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label="Email">
+                <div className="relative">
+                  <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="pl-9" placeholder="jean@dupont.fr" />
+                </div>
+              </FormField>
+              <FormField label="Téléphone">
+                <div className="relative">
+                  <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <Input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="pl-9" placeholder="06 12 34 56 78" />
+                </div>
+              </FormField>
+            </div>
+
+            <FormField label="Adresse">
+              <Input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 rue de la Paix, 75000 Paris" />
+            </FormField>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label="Adresse de facturation">
+                <Input type="text" value={form.billingAddress} onChange={(e) => setForm({ ...form, billingAddress: e.target.value })} placeholder="Adresse de facturation" />
+              </FormField>
+              <FormField label="Numéro fiscal / TVA">
+                <Input type="text" value={form.taxNumber} onChange={(e) => setForm({ ...form, taxNumber: e.target.value })} placeholder="FR12345678901" />
+              </FormField>
+            </div>
+
+            <FormField label="Notes">
+              <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Notes internes..." />
+            </FormField>
           </div>
-        )}
+        </Modal>
+
+        <ConfirmDialog
+          open={!!clientToArchive}
+          onClose={() => setClientToArchive(null)}
+          onConfirm={handleArchive}
+          title="Archiver ce client ?"
+          description={
+            clientToArchive ? (
+              <>
+                Le client <strong className="text-slate-700 dark:text-slate-200">{clientToArchive.firstName} {clientToArchive.lastName}</strong> sera masqué de la liste principale. Son historique et ses documents seront conservés.
+              </>
+            ) : null
+          }
+          confirmLabel="Confirmer"
+          cancelLabel="Annuler"
+          tone="danger"
+        />
       </div>
     </Sidebar>
   );

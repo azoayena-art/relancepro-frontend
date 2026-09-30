@@ -1,13 +1,20 @@
 import Sidebar from '../components/Sidebar';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
+import { useCompanySettings } from '../hooks/useCompanySettings';
+import { toast } from 'sonner';
 import {
-  Plus, Search, Edit2, X, Phone, Mail, Building, FileText,
-  Users, Filter, AlertCircle, UserCheck, Archive, RotateCcw,
-  CheckCircle2, RefreshCw, MoreVertical
+  PageHeader, Modal, ActionMenu, ActionMenuItem, StatCell, StatusIndicator,
+  DotLabel, Avatar, SkeletonRow, SkeletonCard, TypeTabs, KPIGrid, Pagination,
+  mapInvoiceStatusToShared, toEntity, formatDate,
+  type Entity, type DotTone,
+} from '../components/ui/SharedUI';
+import {
+  Plus, Search, Edit2, Phone, Mail, Building, FileText,
+  Users, Filter, AlertCircle, UserCheck, Archive, RotateCcw
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 
@@ -26,18 +33,8 @@ interface Prospect {
   firstContactDate?: string;
   lastContactDate?: string;
   teamId?: string;
+  $createdAt?: string;
 }
-
-const statusColors: Record<string, string> = {
-  new: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  contacted: 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/40 dark:text-yellow-300',
-  quote_sent: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
-  pending: 'bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300',
-  followup: 'bg-pink-100 text-pink-800 dark:bg-pink-900/40 dark:text-pink-300',
-  won: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  lost: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-  archived: 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-};
 
 const statusLabels: Record<string, string> = {
   new: 'Nouveau',
@@ -57,6 +54,13 @@ const sourceLabels: Record<string, string> = {
   other: 'Autre'
 };
 
+const sourceTones: Record<string, DotTone> = {
+  website: 'sky',
+  phone: 'teal',
+  referral: 'violet',
+  other: 'slate'
+};
+
 const emptyForm = {
   firstName: '',
   lastName: '',
@@ -74,7 +78,8 @@ export default function Prospects() {
   const { user } = useAuth();
   const { hasPermission, loading: permLoading } = usePermissions();
   const navigate = useNavigate();
-  
+  const { currency, currencyConfig, loading: settingsLoading } = useCompanySettings();
+
   const [prospects, setProspects] = useState<Prospect[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
@@ -86,12 +91,29 @@ export default function Prospects() {
   const [duplicateFound, setDuplicateFound] = useState<Prospect | null>(null);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
-  const [mobileActionMenu, setMobileActionMenu] = useState<string | null>(null);
+  const [prospectToArchive, setProspectToArchive] = useState<Prospect | null>(null);
+  const [prospectToConvert, setProspectToConvert] = useState<Prospect | null>(null);
+  const [converting, setConverting] = useState(false);
+  const [activeStat, setActiveStat] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+
+  const ITEMS_PER_PAGE = 20;
+
+  // ⌘K / Ctrl+K : focus recherche
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+        e.preventDefault();
+        searchInputRef.current?.focus();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, []);
 
   useEffect(() => {
-    if (!permLoading && !hasPermission('prospects.view')) {
-      navigate('/dashboard');
-    }
+    if (!permLoading && !hasPermission('prospects.view')) navigate('/dashboard');
   }, [permLoading, hasPermission, navigate]);
 
   useEffect(() => {
@@ -99,7 +121,7 @@ export default function Prospects() {
     loadProspects();
   }, [user, viewMode]);
 
-  const loadProspects = async (background = false) => {
+    const loadProspects = async (background = false) => {
     if (!background) setLoading(true);
     try {
       let teamId = null;
@@ -109,17 +131,28 @@ export default function Prospects() {
         const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
+      
+      // ✅ AJOUTEZ CES LOGS POUR VÉRIFIER L'INCOHÉRENCE
+      console.log("🔍 DEBUG Prospects.tsx - teamId résolu pour la recherche:", teamId);
+      console.log("🔍 DEBUG Prospects.tsx - user.$id:", user.$id);
 
       if (!teamId) { if (!background) setLoading(false); return; }
       setCurrentTeamId(teamId);
-
+      
       const response = await databases.listDocuments(
         DATABASE_ID, 'prospects',
         [Query.equal('teamId', teamId), Query.orderDesc('$createdAt'), Query.limit(2000)]
       );
+      
+      console.log("🔍 DEBUG Prospects.tsx - Nombre de documents trouvés:", response.documents.length);
+      if (response.documents.length > 0) {
+        console.log("🔍 DEBUG Prospects.tsx - teamId du premier prospect trouvé:", response.documents[0].teamId);
+      }
+      
       setProspects(response.documents as unknown as Prospect[]);
     } catch (error) {
       console.error('❌ Erreur chargement prospects:', error);
+      toast.error('Erreur de chargement des prospects');
     } finally {
       if (!background) setLoading(false);
     }
@@ -159,29 +192,25 @@ export default function Prospects() {
       notes: prospect.notes || ''
     });
     setShowModal(true);
-    setMobileActionMenu(null);
   };
 
   const handleSave = async () => {
     if (!form.firstName || !form.lastName) {
-      alert('Veuillez remplir le prénom et le nom.');
+      toast.error('Champs requis', { description: 'Veuillez remplir le prénom et le nom.' });
       return;
     }
-    if (!currentTeamId) { 
-      alert('Erreur : Aucune équipe trouvée'); 
-      return; 
+    if (!currentTeamId) {
+      toast.error('Erreur', { description: 'Aucune équipe trouvée' });
+      return;
     }
-
     if (!editingId && !duplicateFound) {
       const existing = await checkDuplicate();
       if (existing) { setDuplicateFound(existing as unknown as Prospect); return; }
     }
-
     setSaving(true);
     try {
       const data = { ...form, teamId: currentTeamId };
       let perms: string[] = [];
-      
       if (user?.secureTeamId) {
         perms = [
           Permission.read(Role.team(user.secureTeamId)),
@@ -195,13 +224,13 @@ export default function Prospects() {
           Permission.delete(Role.users())
         ];
       }
-
       if (editingId) {
         await databases.updateDocument(DATABASE_ID, 'prospects', editingId, data);
+        toast.success('Prospect mis à jour', { description: `${form.firstName} ${form.lastName}`.trim() });
       } else {
         await databases.createDocument(DATABASE_ID, 'prospects', ID.unique(), data, perms);
+        toast.success('Prospect ajouté', { description: `${form.firstName} ${form.lastName}`.trim() });
       }
-      
       setShowModal(false);
       setDuplicateFound(null);
       setEditingId(null);
@@ -210,21 +239,24 @@ export default function Prospects() {
       await loadProspects();
     } catch (error: any) {
       console.error("❌ ERREUR APPWRITE:", error);
-      alert(`Erreur lors de l'enregistrement : ${error.message}`);
+      toast.error('Erreur lors de l\'enregistrement', { description: error.message });
     } finally {
       setSaving(false);
     }
   };
 
-  const handleConvertToClient = async (prospect: Prospect) => {
-    if (!confirm(`Convertir "${prospect.firstName} ${prospect.lastName}" en client ?\n\nCela créera une fiche client et marquera ce prospect comme "Gagné".`)) return;
-    if (!user?.secureTeamId) { alert('Erreur de sécurité : Équipe native non chargée.'); return; }
-
+  const handleConvertToClient = async () => {
+    const prospect = prospectToConvert;
+    if (!prospect) return;
+    if (!user?.secureTeamId) {
+      toast.error('Erreur de sécurité', { description: 'Équipe native non chargée.' });
+      return;
+    }
+    setConverting(true);
     try {
       const currentYear = new Date().getFullYear();
       const prefix = `CLI-${currentYear}-`;
       let maxNum = 0;
-      
       try {
         const existingClients = await databases.listDocuments(DATABASE_ID, 'clients', [
           Query.equal('teamId', currentTeamId),
@@ -237,11 +269,9 @@ export default function Prospects() {
           }
         });
       } catch (e) { console.error('Erreur lecture clients existants:', e); }
-      
       const newClientId = `${prefix}${String(maxNum + 1).padStart(3, '0')}`;
-
       await databases.createDocument(
-        DATABASE_ID, 'clients', ID.unique(), 
+        DATABASE_ID, 'clients', ID.unique(),
         {
           teamId: currentTeamId,
           userId: user.$id,
@@ -263,50 +293,55 @@ export default function Prospects() {
           Permission.delete(Role.team(user.secureTeamId))
         ]
       );
-
       await databases.updateDocument(DATABASE_ID, 'prospects', prospect.$id, { status: 'won' });
+      setProspectToConvert(null);
       await loadProspects(true);
-      
-      const goToClient = confirm(`✅ Prospect converti avec succès !\nNuméro client : ${newClientId}\n\nVoulez-vous voir la fiche client maintenant ?`);
-      if (goToClient) navigate('/clients');
+      toast.success('Prospect converti en client', {
+        description: `Numéro client : ${newClientId}`,
+        action: { label: 'Voir les clients', onClick: () => navigate('/clients') },
+      });
     } catch (error: any) {
       console.error('Erreur conversion:', error);
-      alert(`❌ Erreur lors de la conversion : ${error.message}`);
+      toast.error('Erreur lors de la conversion', { description: error.message });
+    } finally {
+      setConverting(false);
     }
   };
 
   const handleQuickStatusChange = async (prospectId: string, newStatus: string) => {
     try {
       await databases.updateDocument(DATABASE_ID, 'prospects', prospectId, { status: newStatus });
+      toast.success('Statut mis à jour', { description: statusLabels[newStatus] || newStatus });
       await loadProspects(true);
-      setMobileActionMenu(null);
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     }
   };
 
-  const handleArchive = async (id: string, name: string) => {
-    if (!confirm(`Archiver le prospect "${name}" ?\nIl sera masqué de la liste principale.`)) return;
+  const handleArchive = async () => {
+    if (!prospectToArchive) return;
     try {
-      const doc = await databases.getDocument(DATABASE_ID, 'prospects', id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
-      await databases.updateDocument(DATABASE_ID, 'prospects', id, { status: 'archived' });
+      const doc = await databases.getDocument(DATABASE_ID, 'prospects', prospectToArchive.$id);
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
+      await databases.updateDocument(DATABASE_ID, 'prospects', prospectToArchive.$id, { status: 'archived' });
+      toast.success('Prospect archivé', { description: `${prospectToArchive.firstName} ${prospectToArchive.lastName}`.trim() });
+      setProspectToArchive(null);
       await loadProspects(true);
-      setMobileActionMenu(null);
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     }
   };
 
   const handleUnarchive = async (id: string, name: string) => {
     try {
       const doc = await databases.getDocument(DATABASE_ID, 'prospects', id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
       await databases.updateDocument(DATABASE_ID, 'prospects', id, { status: 'new' });
+      toast.success('Prospect désarchivé', { description: name });
       await loadProspects(true);
       setViewMode('active');
     } catch (error: any) {
-      alert(`Erreur : ${error.message}`);
+      toast.error('Erreur', { description: error.message });
     }
   };
 
@@ -318,61 +353,123 @@ export default function Prospects() {
     return matchSearch && matchStatus && matchView;
   });
 
-  if (permLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
+  const totalActive = prospects.filter(p => p.status !== 'archived').length;
+  const totalNew = prospects.filter(p => p.status !== 'archived' && p.status === 'new').length;
+  const totalQuoteSent = prospects.filter(p => p.status !== 'archived' && p.status === 'quote_sent').length;
+  const totalWon = prospects.filter(p => p.status === 'won').length;
+  const totalArchived = prospects.filter(p => p.status === 'archived').length;
+
+  const now = new Date();
+  const prevMonthRef = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const isThisMonth = (d?: string) => {
+    if (!d) return false;
+    const dt = new Date(d);
+    return dt.getMonth() === now.getMonth() && dt.getFullYear() === now.getFullYear();
+  };
+  const isPrevMonth = (d?: string) => {
+    if (!d) return false;
+    const dt = new Date(d);
+    return dt.getMonth() === prevMonthRef.getMonth() && dt.getFullYear() === prevMonthRef.getFullYear();
+  };
+  const calcTrend = (pred: (p: Prospect) => boolean) => {
+    const cur = prospects.filter(p => pred(p) && isThisMonth(p.$createdAt)).length;
+    const prev = prospects.filter(p => pred(p) && isPrevMonth(p.$createdAt)).length;
+    if (prev === 0) return cur > 0 ? 100 : 0;
+    return Math.round(((cur - prev) / prev) * 1000) / 10;
+  };
+
+  const trendActive = calcTrend(p => p.status !== 'archived');
+  const trendNew = calcTrend(p => p.status !== 'archived' && p.status === 'new');
+  const trendQuote = calcTrend(p => p.status !== 'archived' && p.status === 'quote_sent');
+  const trendWon = calcTrend(p => p.status === 'won');
+
+  // ✅ Onglets migrés vers TypeTabs
+  const viewTabs = [
+    { key: 'active', label: 'Actifs', count: totalActive },
+    { key: 'archived', label: 'Archivés', count: totalArchived },
+  ];
+
+  // Pagination
+  const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
+  const paginatedProspects = filtered.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  );
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [search, filterStatus, viewMode]);
+
+  if (permLoading || settingsLoading) return (
+    <Sidebar>
+      <div className="flex items-center justify-center h-full w-full">
+        <div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div>
+      </div>
+    </Sidebar>
+  );
   if (!hasPermission('prospects.view')) return null;
 
   return (
     <Sidebar>
       <div className="min-h-full bg-slate-50 dark:bg-slate-900">
-        {/* HEADER STICKY */}
-        <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-              <div className="flex items-center gap-3">
-                <div>
-                  <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Users size={24} className="text-purple-600" />
-                    Prospects
-                  </h1>
-                  <p className="text-sm text-slate-500 dark:text-slate-400">{filtered.length} résultat(s) {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}</p>
-                </div>
-              </div>
-              {viewMode === 'active' && hasPermission('prospects.create') && (
-                <button onClick={handleOpenAdd} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-purple-600 text-white px-4 py-2.5 rounded-lg hover:bg-purple-700 transition-colors font-medium text-sm shadow-sm active:scale-95">
-                  <Plus size={18} /><span>Nouveau prospect</span>
-                </button>
-              )}
-            </div>
-          </div>
-        </header>
+        {/* ✅ EN-TÊTE migré vers PageHeader */}
+        <PageHeader
+          icon={Users}
+          iconColor="purple"
+          title="Prospects"
+          description={
+            <>
+              <span className="font-semibold text-slate-700 dark:text-slate-300 tabular-nums">{filtered.length}</span> résultat(s) {viewMode === 'active' ? 'actif(s)' : 'archivé(s)'}
+            </>
+          }
+          currency={currency || 'EUR'}
+          currencySymbol={currencyConfig?.symbol || '€'}
+          action={
+            viewMode === 'active' && hasPermission('prospects.create') ? (
+              <button onClick={handleOpenAdd} className="w-full sm:w-auto flex items-center justify-center gap-2 bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-4 py-2.5 rounded-lg hover:from-purple-700 hover:to-indigo-700 transition-all font-medium text-sm shadow-lg shadow-purple-500/30 active:scale-95">
+                <Plus size={18} /> <span>Nouveau prospect</span>
+              </button>
+            ) : null
+          }
+        />
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          {/* ONGLETS */}
-          <div className="flex border-b border-slate-200 dark:border-slate-700 mb-6">
-            <button onClick={() => setViewMode('active')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'active' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              Actifs ({prospects.filter(p => p.status !== 'archived').length})
-            </button>
-            <button onClick={() => setViewMode('archived')} className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors ${viewMode === 'archived' ? 'border-purple-600 text-purple-600 dark:text-purple-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-              Archivés ({prospects.filter(p => p.status === 'archived').length})
-            </button>
-          </div>
+          {/* ✅ KPIs migrés vers KPIGrid + StatCell */}
+          <KPIGrid columns={4}>
+            <StatCell value={totalActive} trend={trendActive} label="Prospects actifs" active={activeStat === 0} onClick={() => setActiveStat(0)} />
+            <StatCell value={totalNew} trend={trendNew} label="Nouveaux" active={activeStat === 1} onClick={() => setActiveStat(1)} />
+            <StatCell value={totalQuoteSent} trend={trendQuote} label="Devis envoyés" active={activeStat === 2} onClick={() => setActiveStat(2)} />
+            <StatCell value={totalWon} trend={trendWon} label="Gagnés" active={activeStat === 3} onClick={() => setActiveStat(3)} />
+          </KPIGrid>
 
-          {/* BARRE DE RECHERCHE ET FILTRES */}
+          {/* ✅ ONGLETS migrés vers TypeTabs */}
+          <TypeTabs
+            tabs={viewTabs}
+            activeTab={viewMode}
+            onTabChange={(key) => setViewMode(key as 'active' | 'archived')}
+            color="purple"
+          />
+
+          {/* RECHERCHE + FILTRES */}
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
             <div className="relative flex-1">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Rechercher (nom, entreprise, email...)" 
-                value={search} 
-                onChange={(e) => setSearch(e.target.value)} 
-                className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm transition-shadow" 
+              <input
+                ref={searchInputRef}
+                type="text"
+                placeholder="Rechercher (nom, entreprise, email...)"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-10 pr-16 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm transition-shadow"
               />
+              <div className="hidden sm:flex absolute right-3 top-1/2 -translate-y-1/2 items-center gap-1 pointer-events-none">
+                <kbd className="h-5 select-none items-center gap-1 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 px-1.5 font-mono text-[10px] font-medium text-slate-500 dark:text-slate-400 flex">⌘K</kbd>
+              </div>
             </div>
             {viewMode === 'active' && (
               <div className="relative sm:w-64">
                 <Filter size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none">
+                <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className="w-full pl-10 pr-4 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-800 dark:text-white rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm bg-white dark:bg-slate-800 appearance-none cursor-pointer">
                   <option value="all">Tous les statuts</option>
                   {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (
                     <option key={key} value={key}>{label}</option>
@@ -382,9 +479,28 @@ export default function Prospects() {
             )}
           </div>
 
-          {/* CONTENU : TABLEAU DESKTOP / CARTES MOBILE */}
           {loading ? (
-            <div className="text-center py-12 text-slate-500 dark:text-slate-400 animate-pulse">Chargement des données...</div>
+            <>
+              <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-visible">
+                <table className="w-full">
+                  <thead className="bg-slate-50/80 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 [&>tr>th:first-child]:rounded-tl-xl [&>tr>th:last-child]:rounded-tr-xl">
+                    <tr>
+                      <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Prospect</th>
+                      <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Contact</th>
+                      <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source</th>
+                      <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Statut</th>
+                      <th className="text-right px-2 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                    {[1, 2, 3, 4, 5].map(i => <SkeletonRow key={i} />)}
+                  </tbody>
+                </table>
+              </div>
+              <div className="md:hidden space-y-4">
+                {[1, 2, 3].map(i => <SkeletonCard key={i} />)}
+              </div>
+            </>
           ) : filtered.length === 0 ? (
             <div className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-12 text-center shadow-sm">
               <Users size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
@@ -397,64 +513,73 @@ export default function Prospects() {
             </div>
           ) : (
             <>
-              {/* VERSION DESKTOP (Tableau) */}
-              <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-hidden">
-                <div className="overflow-x-auto">
+              {/* TABLEAU DESKTOP */}
+              <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-visible">
+                <div className="overflow-visible">
                   <table className="w-full">
-                    <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
+                    <thead className="bg-slate-50/80 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700 [&>tr>th:first-child]:rounded-tl-xl [&>tr>th:last-child]:rounded-tr-xl">
                       <tr>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Nom</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Entreprise</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Contact</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source</th>
-                        <th className="text-left px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Statut</th>
-                        <th className="text-right px-6 py-4 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Actions</th>
+                        <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Prospect</th>
+                        <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Contact</th>
+                        <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Source</th>
+                        <th className="text-left px-6 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">Statut</th>
+                        <th className="text-right px-2 py-4 text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider w-12"></th>
                       </tr>
                     </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {filtered.map((p) => (
-                        <tr key={p.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-700/50">
+                      {paginatedProspects.map((p) => (
+                        <tr key={p.$id} className="group hover:bg-purple-50/50 dark:hover:bg-slate-700/30 transition-colors duration-200 last:[&>td:first-child]:rounded-bl-xl last:[&>td:last-child]:rounded-br-xl">
                           <td className="px-6 py-4">
-                            <div className="font-medium text-slate-900 dark:text-white">{p.firstName} {p.lastName}</div>
-                          </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{p.companyName || '-'}</td>
-                          <td className="px-6 py-4">
-                            <div className="flex flex-col space-y-1.5">
-                              {p.email && <span className="flex items-center text-sm text-slate-600 dark:text-slate-300"><Mail size={14} className="mr-2 text-slate-400" />{p.email}</span>}
-                              {p.phone && <span className="flex items-center text-sm text-slate-600 dark:text-slate-300"><Phone size={14} className="mr-2 text-slate-400" />{p.phone}</span>}
+                            <div className="flex items-center gap-3">
+                              <Avatar client={toEntity(p)} />
+                              <div className="min-w-0">
+                                <div className="font-semibold text-slate-900 dark:text-white text-sm truncate">{p.firstName} {p.lastName}</div>
+                                {p.companyName && (
+                                  <div className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5 truncate">
+                                    <Building size={11} /> {p.companyName}
+                                  </div>
+                                )}
+                              </div>
                             </div>
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{sourceLabels[p.source] || p.source}</td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[p.status] || 'bg-gray-100 text-gray-800'}`}>
-                              {statusLabels[p.status] || p.status}
-                            </span>
+                            <div className="flex flex-col space-y-1">
+                              {p.email && <span className="flex items-center text-xs text-slate-600 dark:text-slate-300 truncate max-w-[200px]"><Mail size={13} className="mr-1.5 text-slate-400 flex-shrink-0" />{p.email}</span>}
+                              {p.phone && <span className="flex items-center text-xs text-slate-600 dark:text-slate-300 tabular-nums"><Phone size={13} className="mr-1.5 text-slate-400" />{p.phone}</span>}
+                              {!p.email && !p.phone && <span className="text-xs text-slate-400 italic">Non renseigné</span>}
+                            </div>
                           </td>
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
-                              {viewMode === 'active' ? (
-                                <>
-                                  {p.status === 'new' && hasPermission('prospects.edit') && (
-                                    <button onClick={() => handleQuickStatusChange(p.$id, 'contacted')} className="p-2 text-slate-400 hover:text-yellow-600 hover:bg-yellow-50 dark:hover:bg-yellow-900/30 rounded-lg transition-colors" title="Marquer comme contacté"><Phone size={16} /></button>
-                                  )}
-                                  {hasPermission('clients.create') && p.status !== 'won' && (
-                                    <button onClick={() => handleConvertToClient(p)} className="p-2 text-slate-400 hover:text-cyan-600 hover:bg-cyan-50 dark:hover:bg-cyan-900/30 rounded-lg transition-colors" title="Convertir en client"><UserCheck size={16} /></button>
-                                  )}
-                                  {hasPermission('quotes.create') && (
-                                    <button onClick={() => navigate(`/quotes?prospectId=${p.$id}`)} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors" title="Créer un devis"><FileText size={16} /></button>
-                                  )}
-                                  {hasPermission('prospects.edit') && (
-                                    <button onClick={() => handleOpenEdit(p)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier"><Edit2 size={16} /></button>
-                                  )}
-                                  {hasPermission('prospects.delete') && (
-                                    <button onClick={() => handleArchive(p.$id, `${p.firstName} ${p.lastName}`)} className="p-2 text-slate-400 hover:text-orange-600 hover:bg-orange-50 dark:hover:bg-orange-900/30 rounded-lg transition-colors" title="Archiver"><Archive size={16} /></button>
-                                  )}
-                                </>
-                              ) : (
-                                <button onClick={() => handleUnarchive(p.$id, `${p.firstName} ${p.lastName}`)} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors">
-                                  <RotateCcw size={14} /><span>Désarchiver</span>
-                                </button>
-                              )}
+                          <td className="px-6 py-4">
+                            <DotLabel label={sourceLabels[p.source] || p.source} tone={sourceTones[p.source] || 'slate'} />
+                          </td>
+                          <td className="px-6 py-4">
+                            <StatusIndicator status={p.status} />
+                          </td>
+                          <td className="px-2 py-4 text-right w-12">
+                            <div className="flex justify-end opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                              <ActionMenu>
+                                {viewMode === 'active' ? (
+                                  <>
+                                    {p.status === 'new' && hasPermission('prospects.edit') && (
+                                      <ActionMenuItem onClick={() => handleQuickStatusChange(p.$id, 'contacted')} icon={Phone} label="Marquer contacté" />
+                                    )}
+                                    {hasPermission('clients.create') && p.status !== 'won' && (
+                                      <ActionMenuItem onClick={() => setProspectToConvert(p)} icon={UserCheck} label="Convertir en client" />
+                                    )}
+                                    {hasPermission('quotes.create') && (
+                                      <ActionMenuItem onClick={() => navigate(`/quotes?prospectId=${p.$id}`)} icon={FileText} label="Créer un devis" />
+                                    )}
+                                    {hasPermission('prospects.edit') && (
+                                      <ActionMenuItem onClick={() => handleOpenEdit(p)} icon={Edit2} label="Modifier" />
+                                    )}
+                                    {hasPermission('prospects.delete') && (
+                                      <ActionMenuItem onClick={() => setProspectToArchive(p)} icon={Archive} label="Archiver" danger />
+                                    )}
+                                  </>
+                                ) : (
+                                  <ActionMenuItem onClick={() => handleUnarchive(p.$id, `${p.firstName} ${p.lastName}`.trim())} icon={RotateCcw} label="Désarchiver" />
+                                )}
+                              </ActionMenu>
                             </div>
                           </td>
                         </tr>
@@ -464,152 +589,218 @@ export default function Prospects() {
                 </div>
               </div>
 
-              {/* VERSION MOBILE (Cartes) */}
+              {/* CARTES MOBILE */}
               <div className="md:hidden space-y-4">
-                {filtered.map((p) => (
-                  <div key={p.$id} className="bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 p-4 shadow-sm">
-                    <div className="flex justify-between items-start mb-3">
-                      <div>
-                        <h3 className="font-semibold text-slate-900 dark:text-white">{p.firstName} {p.lastName}</h3>
-                        <p className="text-sm text-slate-500 dark:text-slate-400">{p.companyName || 'Particulier'}</p>
+                {paginatedProspects.map((p) => (
+                  <div key={p.$id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
+                    <div className="flex justify-between items-start mb-4">
+                      <div className="flex items-center gap-3 flex-1 min-w-0">
+                        <Avatar client={toEntity(p)} size="lg" />
+                        <div className="min-w-0">
+                          <h3 className="font-bold text-slate-900 dark:text-white truncate text-base">{p.firstName} {p.lastName}</h3>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {p.companyName
+                              ? <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 truncate">{p.companyName}</span>
+                              : <DotLabel label={sourceLabels[p.source] || p.source} tone={sourceTones[p.source] || 'slate'} />
+                            }
+                            {p.companyName && (
+                              <>
+                                <span className="text-slate-300 dark:text-slate-600">•</span>
+                                <DotLabel label={sourceLabels[p.source] || p.source} tone={sourceTones[p.source] || 'slate'} />
+                              </>
+                            )}
+                          </div>
+                        </div>
                       </div>
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[p.status]}`}>
-                        {statusLabels[p.status]}
-                      </span>
+                      <StatusIndicator status={p.status} />
                     </div>
-                    
-                    <div className="space-y-2 mb-4 text-sm">
-                      {p.phone && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Phone size={14} className="text-slate-400" /> {p.phone}</div>}
-                      {p.email && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300"><Mail size={14} className="text-slate-400" /> {p.email}</div>}
-                      <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300">
-                        <Building size={14} className="text-slate-400" /> {sourceLabels[p.source] || p.source}
-                      </div>
+                    <div className="space-y-2 mb-4 bg-slate-50 dark:bg-slate-900/50 rounded-xl p-3 border border-slate-100 dark:border-slate-700/50">
+                      {p.phone && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm tabular-nums"><Phone size={14} className="text-slate-400" /> {p.phone}</div>}
+                      {p.email && <div className="flex items-center gap-2 text-slate-600 dark:text-slate-300 text-sm truncate"><Mail size={14} className="text-slate-400 flex-shrink-0" /> <span className="truncate">{p.email}</span></div>}
+                      {!p.phone && !p.email && <div className="text-xs text-slate-400 italic text-center py-1">Aucun contact renseigné</div>}
                     </div>
-
-                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700">
+                    <div className="pt-3 border-t border-slate-100 dark:border-slate-700 flex items-center justify-between gap-2">
                       {viewMode === 'active' ? (
-                        <div className="grid grid-cols-4 gap-2">
-                          {hasPermission('prospects.edit') && (
-                            <button onClick={() => handleOpenEdit(p)} className="flex flex-col items-center justify-center p-2 text-purple-600 bg-purple-50 dark:bg-purple-900/30 rounded-lg active:scale-95 transition-transform">
-                              <Edit2 size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Modifier</span>
+                        <div className="flex items-center gap-2 flex-1">
+                          {hasPermission('quotes.create') && (
+                            <button onClick={() => navigate(`/quotes?prospectId=${p.$id}`)} className="flex-1 flex items-center justify-center gap-1.5 p-2.5 text-green-600 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform text-xs font-medium">
+                              <FileText size={16} /> Devis
                             </button>
                           )}
                           {hasPermission('clients.create') && p.status !== 'won' && (
-                            <button onClick={() => handleConvertToClient(p)} className="flex flex-col items-center justify-center p-2 text-cyan-600 bg-cyan-50 dark:bg-cyan-900/30 rounded-lg active:scale-95 transition-transform">
-                              <UserCheck size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Client</span>
-                            </button>
-                          )}
-                          {hasPermission('quotes.create') && (
-                            <button onClick={() => navigate(`/quotes?prospectId=${p.$id}`)} className="flex flex-col items-center justify-center p-2 text-green-600 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
-                              <FileText size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Devis</span>
-                            </button>
-                          )}
-                          {hasPermission('prospects.delete') && (
-                            <button onClick={() => handleArchive(p.$id, `${p.firstName} ${p.lastName}`)} className="flex flex-col items-center justify-center p-2 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">
-                              <Archive size={18} />
-                              <span className="text-[10px] mt-1 font-medium">Archiver</span>
+                            <button onClick={() => setProspectToConvert(p)} className="flex-1 flex items-center justify-center gap-1.5 p-2.5 text-blue-600 bg-blue-50 dark:bg-blue-900/30 rounded-lg active:scale-95 transition-transform text-xs font-medium">
+                              <UserCheck size={16} /> Client
                             </button>
                           )}
                         </div>
                       ) : (
-                        <button onClick={() => handleUnarchive(p.$id, `${p.firstName} ${p.lastName}`)} className="w-full flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
+                        <button onClick={() => handleUnarchive(p.$id, `${p.firstName} ${p.lastName}`.trim())} className="w-full flex items-center justify-center gap-2 p-3 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 rounded-lg active:scale-95 transition-transform">
                           <RotateCcw size={16} /><span>Désarchiver</span>
                         </button>
+                      )}
+                      {viewMode === 'active' && (
+                        <ActionMenu>
+                          {p.status === 'new' && hasPermission('prospects.edit') && (
+                            <ActionMenuItem onClick={() => handleQuickStatusChange(p.$id, 'contacted')} icon={Phone} label="Marquer contacté" />
+                          )}
+                          {hasPermission('prospects.edit') && (
+                            <ActionMenuItem onClick={() => handleOpenEdit(p)} icon={Edit2} label="Modifier" />
+                          )}
+                          {hasPermission('prospects.delete') && (
+                            <ActionMenuItem onClick={() => setProspectToArchive(p)} icon={Archive} label="Archiver" danger />
+                          )}
+                        </ActionMenu>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
+
+              {/* ✅ PAGINATION ajoutée */}
+              <Pagination
+                currentPage={currentPage}
+                totalPages={totalPages}
+                onPageChange={setCurrentPage}
+                startItem={(currentPage - 1) * ITEMS_PER_PAGE + 1}
+                endItem={Math.min(currentPage * ITEMS_PER_PAGE, filtered.length)}
+                totalItems={filtered.length}
+                itemName="prospect"
+              />
             </>
           )}
         </main>
 
-        {/* MODAL */}
-        {showModal && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
-            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-2xl max-h-[90vh] overflow-y-auto animate-slideUp">
-              <div className="sticky top-0 bg-white dark:bg-slate-800 z-10 flex items-center justify-between px-4 sm:px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-                <h2 className="text-lg sm:text-xl font-bold text-slate-900 dark:text-white">{editingId ? 'Modifier le prospect' : 'Nouveau prospect'}</h2>
-                <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
-                  <X size={20} className="text-slate-500 dark:text-slate-400" />
-                </button>
-              </div>
-              
-              <div className="px-4 sm:px-6 py-4 space-y-4">
-                {duplicateFound && !editingId && (
-                  <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-lg">
-                    <p className="font-semibold flex items-center gap-2 text-sm"><AlertCircle size={16} /> Doublon détecté</p>
-                    <p className="text-sm mt-1">Un prospect avec ces coordonnées existe déjà : <strong>{duplicateFound.firstName} {duplicateFound.lastName}</strong>.</p>
-                    <div className="flex gap-2 mt-3">
-                      <button type="button" onClick={() => { handleOpenEdit(duplicateFound); }} className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded hover:bg-purple-700 active:scale-95 transition-transform">Mettre à jour</button>
-                      <button type="button" onClick={() => setDuplicateFound(null)} className="px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform">Créer quand même</button>
-                    </div>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Prénom *</label>
-                    <input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Jean" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Nom *</label>
-                    <input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Dupont" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Building size={14} />Entreprise</label>
-                  <input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="Dupont Plomberie" />
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Mail size={14} />Email</label>
-                    <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="jean@dupont.fr" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5 flex items-center gap-1.5"><Phone size={14} />Téléphone</label>
-                    <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" placeholder="06 12 34 56 78" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Source</label>
-                    <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
-                      {Object.entries(sourceLabels).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Statut</label>
-                    <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
-                      {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
-                    </select>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Besoins</label>
-                  <textarea value={form.needs} onChange={(e) => setForm({ ...form, needs: e.target.value })} rows={2} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none" placeholder="Décrivez les besoins..." />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Notes</label>
-                  <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none" placeholder="Notes internes..." />
+        {/* MODAL Création / Édition - migré vers Modal */}
+        <Modal
+          open={showModal}
+          onClose={() => { setShowModal(false); setDuplicateFound(null); }}
+          title={editingId ? 'Modifier le prospect' : 'Nouveau prospect'}
+          icon={<Users size={20} className="text-purple-600" />}
+          maxWidth="sm:max-w-2xl"
+          footer={
+            <>
+              <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="flex-1 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
+              <button onClick={handleSave} disabled={saving || !form.firstName || !form.lastName} className="flex-1 px-4 py-2.5 text-sm font-semibold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-lg hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all flex items-center justify-center gap-2 shadow-lg shadow-purple-500/20">
+                {saving ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Enregistrement...</> : (editingId ? 'Mettre à jour' : 'Ajouter')}
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-5">
+            {duplicateFound && !editingId && (
+              <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 text-yellow-800 dark:text-yellow-200 px-4 py-3 rounded-xl shadow-sm">
+                <p className="font-semibold flex items-center gap-2 text-sm"><AlertCircle size={16} /> Doublon détecté</p>
+                <p className="text-sm mt-1">Un prospect avec ces coordonnées existe déjà : <strong>{duplicateFound.firstName} {duplicateFound.lastName}</strong>.</p>
+                <div className="flex gap-2 mt-3">
+                  <button type="button" onClick={() => { handleOpenEdit(duplicateFound); }} className="px-3 py-2 bg-purple-600 text-white text-xs font-medium rounded-lg hover:bg-purple-700 active:scale-95 transition-transform shadow-sm">Mettre à jour</button>
+                  <button type="button" onClick={() => setDuplicateFound(null)} className="px-3 py-2 bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium rounded-lg hover:bg-slate-300 dark:hover:bg-slate-600 active:scale-95 transition-transform">Créer quand même</button>
                 </div>
               </div>
-
-              <div className="sticky bottom-0 bg-slate-50 dark:bg-slate-800/90 backdrop-blur-sm flex items-center justify-end gap-3 px-4 sm:px-6 py-4 border-t border-slate-200 dark:border-slate-700 rounded-b-2xl">
-                <button onClick={() => { setShowModal(false); setDuplicateFound(null); }} className="flex-1 sm:flex-none px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
-                <button onClick={handleSave} disabled={saving || !form.firstName || !form.lastName} className="flex-1 sm:flex-none px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95 transition-all">
-                  {saving ? 'Enregistrement...' : (editingId ? 'Mettre à jour' : 'Ajouter')}
-                </button>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Prénom *</label>
+                <input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="Jean" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Nom *</label>
+                <input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="Dupont" />
               </div>
             </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5"><Building size={12} />Entreprise</label>
+              <input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="Dupont Plomberie" />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5"><Mail size={12} />Email</label>
+                <input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="jean@dupont.fr" />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5"><Phone size={12} />Téléphone</label>
+                <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="06 12 34 56 78" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Source</label>
+                <select value={form.source} onChange={(e) => setForm({ ...form, source: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700 shadow-sm">
+                  {Object.entries(sourceLabels).map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Statut</label>
+                <select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700 shadow-sm">
+                  {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (<option key={key} value={key}>{label}</option>))}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Adresse</label>
+              <input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="123 rue de la Paix, 75000 Paris" />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Besoins</label>
+              <textarea value={form.needs} onChange={(e) => setForm({ ...form, needs: e.target.value })} rows={2} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none shadow-sm" placeholder="Décrivez les besoins..." />
+            </div>
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Notes</label>
+              <textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none shadow-sm" placeholder="Notes internes..." />
+            </div>
           </div>
+        </Modal>
+
+        {/* MODAL Confirmation conversion en client - migré vers Modal */}
+        {prospectToConvert && (
+          <Modal
+            open={!!prospectToConvert}
+            onClose={() => setProspectToConvert(null)}
+            title="Convertir en client ?"
+            icon={<UserCheck size={20} className="text-purple-600" />}
+            maxWidth="sm:max-w-md"
+            footer={
+              <>
+                <button onClick={() => setProspectToConvert(null)} className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                  Annuler
+                </button>
+                <button onClick={handleConvertToClient} disabled={converting} className="flex-1 px-4 py-3 text-sm font-bold text-white bg-gradient-to-r from-purple-600 to-indigo-600 rounded-xl hover:from-purple-700 hover:to-indigo-700 active:scale-95 transition-all shadow-lg shadow-purple-500/20 flex items-center justify-center gap-2 disabled:opacity-50">
+                  {converting
+                    ? <><span className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full"></span> Conversion...</>
+                    : <><UserCheck size={16} /> Convertir</>
+                  }
+                </button>
+              </>
+            }
+          >
+            <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
+              <strong className="text-slate-700 dark:text-slate-200">{prospectToConvert.firstName} {prospectToConvert.lastName}</strong> deviendra un client actif (fiche créée automatiquement) et ce prospect sera marqué comme <strong className="text-slate-700 dark:text-slate-200">Gagné</strong>.
+            </p>
+          </Modal>
+        )}
+
+        {/* MODAL Confirmation archivage - migré vers Modal */}
+        {prospectToArchive && (
+          <Modal
+            open={!!prospectToArchive}
+            onClose={() => setProspectToArchive(null)}
+            title="Archiver ce prospect ?"
+            icon={<Archive size={20} className="text-red-600" />}
+            maxWidth="sm:max-w-md"
+            footer={
+              <>
+                <button onClick={() => setProspectToArchive(null)} className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-xl hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                  Annuler
+                </button>
+                <button onClick={handleArchive} className="flex-1 px-4 py-3 text-sm font-bold text-white bg-gradient-to-r from-red-500 to-red-600 rounded-xl hover:from-red-600 hover:to-red-700 active:scale-95 transition-all shadow-lg shadow-red-500/20 flex items-center justify-center gap-2">
+                  <Archive size={16} /> Confirmer
+                </button>
+              </>
+            }
+          >
+            <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
+              Le prospect <strong className="text-slate-700 dark:text-slate-200">{prospectToArchive.firstName} {prospectToArchive.lastName}</strong> sera masqué de la liste principale. Son historique sera conservé.
+            </p>
+          </Modal>
         )}
       </div>
     </Sidebar>

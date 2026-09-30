@@ -1,3 +1,5 @@
+import { Toaster } from "sonner";
+import SetupAttributes from './pages/SetupAttributes';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
@@ -12,6 +14,7 @@ import ClientDetail from './pages/ClientDetail';
 import Catalogue from './pages/Catalogue';
 import Quotes from './pages/Quotes';
 import Invoices from './pages/Invoices';
+import InvoiceDetail from './pages/InvoiceDetail';
 import Receipts from './pages/Receipts';
 import TeamSettings from './pages/TeamSettings';
 import CompanySettings from './pages/CompanySettings';
@@ -81,10 +84,12 @@ function AppRoutes() {
       <Route path="/clients/:id" element={<ProtectedRoute><ClientDetail /></ProtectedRoute>} />
 
       <Route path="/catalogue" element={<ProtectedRoute><Catalogue /></ProtectedRoute>} />
-
       <Route path="/quotes" element={<ProtectedRoute><Quotes /></ProtectedRoute>} />
 
+      {/* --- Factures --- */}
       <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
+      <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetail /></ProtectedRoute>} />
+
       <Route path="/receipts" element={<ProtectedRoute><Receipts /></ProtectedRoute>} />
 
       <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />
@@ -94,8 +99,11 @@ function AppRoutes() {
       <Route path="/team-settings" element={<ProtectedRoute><TeamSettings /></ProtectedRoute>} />
       <Route path="/company-settings" element={<ProtectedRoute><CompanySettings /></ProtectedRoute>} />
 
-      {/* --- 🛡️ OUTIL DE MIGRATION DE SÉCURITÉ (admin) --- */}
+      {/* --- Outil de migration de sécurité (admin) --- */}
       <Route path="/admin/security-migration" element={<ProtectedRoute><SecurityMigration /></ProtectedRoute>} />
+
+      {/* --- Setup --- */}
+      <Route path="/setup" element={<SetupAttributes />} />
 
       {/* --- Route inconnue : retour au dashboard --- */}
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
@@ -108,6 +116,7 @@ export default function App() {
   return (
     <AuthProvider>
       <BrowserRouter>
+        <Toaster richColors position="top-right" closeButton />
         <AppRoutes />
       </BrowserRouter>
     </AuthProvider>

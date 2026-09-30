@@ -3,12 +3,38 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
+import { useCompanySettings } from '../hooks/useCompanySettings';
+import { toast } from 'sonner';
 import {
-  ChevronLeft, UserCheck, Mail, Phone, Building, MapPin, FileText,
-  Receipt, Edit2, Archive, RotateCcw, Hash, Calendar, TrendingUp,
-  DollarSign, AlertCircle, Clock, CheckCircle2, User
+  PageHeader,
+  TypeTabs,
+  KPIGrid,
+  StatCell,
+  EmptyState,
+  StatusIndicator,
+  TypeLabel,
+  ConfirmDialog,
+  Alert,
+  Pagination,
+  Card,
+  Badge,
+  SectionTitle,
+  DataTable,
+  MobileCard,
+  formatDate,
+  mapInvoiceStatusToShared,
+  statusLabels,
+} from '../components/ui/SharedUI';
+import {
+  ChevronLeft, Mail, Phone, Building, MapPin, FileText,
+  Receipt, Edit2, Archive, RotateCcw, Hash, Calendar,
+  AlertCircle, Clock, User
 } from 'lucide-react';
-import { Query, ID } from 'appwrite';
+import { Query } from 'appwrite';
+
+// ============================================================
+// 📋 INTERFACES
+// ============================================================
 
 interface Client {
   $id: string;
@@ -34,6 +60,9 @@ interface Quote {
   $id: string;
   quoteNumber: string;
   clientName: string;
+  clientEmail?: string;
+  clientId?: string;
+  prospectId?: string;
   subject?: string;
   status: string;
   total: number;
@@ -45,45 +74,35 @@ interface Invoice {
   $id: string;
   invoiceNumber: string;
   clientName?: string;
+  clientId?: string;
   status: string;
   total: number;
+  subtotal?: number;
   balance?: number;
   issueDate?: string;
   dueDate?: string;
   paidAt?: string;
   $createdAt?: string;
+  type?: string;
+  originalInvoiceId?: string;
+  payments?: any;
+  deposit?: number;
+  companyTva?: string;
 }
 
-const statusColors: Record<string, string> = {
-  Brouillon: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300',
-  Envoyé: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-  Accepté: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  Refusé: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-  Facturé: 'bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300',
-  paid: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
-  unpaid: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-  draft: 'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-};
+// ⚙️ Pagination
+const ITEMS_PER_PAGE = 10;
 
-const quoteStatusLabels: Record<string, string> = {
-  Brouillon: 'Brouillon',
-  Envoyé: 'Envoyé',
-  Accepté: 'Accepté',
-  Refusé: 'Refusé',
-  Facturé: 'Facturé'
-};
-
-const invoiceStatusLabels: Record<string, string> = {
-  paid: 'Payée',
-  unpaid: 'Non payée',
-  draft: 'Brouillon'
-};
+// ============================================================
+// 🎯 COMPOSANT PRINCIPAL
+// ============================================================
 
 export default function ClientDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const { hasPermission, loading: permLoading } = usePermissions();
   const navigate = useNavigate();
+  const { fm, currency, currencyConfig, loading: settingsLoading } = useCompanySettings();
 
   const [client, setClient] = useState<Client | null>(null);
   const [quotes, setQuotes] = useState<Quote[]>([]);
@@ -91,6 +110,14 @@ export default function ClientDetail() {
   const [loading, setLoading] = useState(true);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'info' | 'quotes' | 'invoices' | 'history'>('info');
+  const [metadataMap, setMetadataMap] = useState<Map<string, any>>(new Map());
+  const [journalPayments, setJournalPayments] = useState<any[]>([]);
+  const [clientToArchive, setClientToArchive] = useState<Client | null>(null);
+
+  // ✅ Pagination
+  const [quotesPage, setQuotesPage] = useState(1);
+  const [invoicesPage, setInvoicesPage] = useState(1);
+  const [historyPage, setHistoryPage] = useState(1);
 
   useEffect(() => {
     if (!permLoading && !hasPermission('clients.view')) {
@@ -102,6 +129,106 @@ export default function ClientDetail() {
     if (!user || !id) return;
     loadClientData();
   }, [user, id]);
+
+  // ✅ Reset pagination quand l'onglet change
+  useEffect(() => {
+    setQuotesPage(1);
+    setInvoicesPage(1);
+    setHistoryPage(1);
+  }, [activeTab]);
+
+  // ============================================================
+  // ✅ HELPERS COMPTABLES
+  // ============================================================
+
+  const round2 = (n: number) => Math.round((n + Number.EPSILON) * 100) / 100;
+
+  const readJson = (raw: unknown): any => {
+    if (!raw) return {};
+    if (typeof raw === 'object') return raw;
+    try { return JSON.parse(raw); } catch { return {}; }
+  };
+
+  const getMeta = (inv: Invoice) => metadataMap.get(inv.$id) || { creditData: {}, archiveData: {}, reconciliationData: {} };
+  const getCreditData = (inv: Invoice): any => getMeta(inv).creditData || {};
+  const getArchiveData = (inv: Invoice): any => getMeta(inv).archiveData || {};
+
+  const isDocArchived = (inv: Invoice): boolean =>
+    inv.status === 'cancelled' || getArchiveData(inv).archived === true;
+
+  const getPaymentsSum = (inv: Invoice): number => {
+    const journalSum = journalPayments
+      .filter(jp => jp.invoiceId === inv.$id && jp.status === 'confirmed')
+      .reduce((s, jp) => s + Number(jp.amount || 0), 0);
+    if (journalSum > 0) return round2(journalSum);
+    let payments: any[] = [];
+    try {
+      if (typeof inv.payments === 'string' && inv.payments.trim()) payments = JSON.parse(inv.payments);
+      else if (Array.isArray(inv.payments)) payments = inv.payments;
+    } catch { payments = []; }
+    return round2(payments.reduce((s, p) => s + Number(p.amount || 0), 0));
+  };
+
+  const getEffectivePaidAmount = (inv: Invoice): number => {
+    const directPayments = getPaymentsSum(inv);
+    if ((inv.type === 'standard' || inv.type === 'balance') && inv.originalInvoiceId) {
+      const advanceInvoice = invoices.find(i => i.$id === inv.originalInvoiceId && i.type === 'advance');
+      if (advanceInvoice && advanceInvoice.status === 'paid') {
+        return round2(directPayments + (advanceInvoice.total || 0));
+      }
+    }
+    return directPayments;
+  };
+
+  const getCreditAllocatedAmount = (inv: Invoice): number => {
+    if (inv.type !== 'credit') return 0;
+    const credit = getCreditData(inv);
+    if (credit.creditStatus === undefined) {
+      const original = invoices.find(i => i.$id === inv.originalInvoiceId);
+      const originalPaid = !!original && original.status === 'paid';
+      return originalPaid ? 0 : (inv.total || 0);
+    }
+    return round2(credit.allocatedAmount || 0);
+  };
+
+  const getAllocatedCredits = (invoiceId: string): number => round2(
+    invoices
+      .filter(i => i.type === 'credit' && i.originalInvoiceId === invoiceId && !isDocArchived(i))
+      .reduce((s, i) => s + getCreditAllocatedAmount(i), 0)
+  );
+
+  const getNetRemaining = (inv: Invoice): number => {
+    if (inv.type === 'credit') return 0;
+    const paidAmount = getEffectivePaidAmount(inv);
+    const allocated = getAllocatedCredits(inv.$id);
+    return round2(Math.max(0, (inv.total || 0) - paidAmount - allocated));
+  };
+
+  const getCreditRefunded = (inv: Invoice): number => {
+    if (inv.type !== 'credit') return 0;
+    const cd = getCreditData(inv);
+    if (cd.creditStatus === undefined) return inv.total || 0;
+    const refunds = Array.isArray(cd.refundPayments) ? cd.refundPayments : [];
+    const sum = refunds.reduce((s: number, r: any) => s + Number(r.amount || 0), 0);
+    return round2(sum || Number(cd.refundedAmount) || 0);
+  };
+
+  const getCreditRefundable = (inv: Invoice): number => {
+    if (inv.type !== 'credit') return 0;
+    const total = inv.total || 0;
+    const allocated = getCreditAllocatedAmount(inv);
+    const refunded = getCreditRefunded(inv);
+    return round2(Math.max(0, total - allocated - refunded));
+  };
+
+  const mapQuoteStatus = (s: string) => {
+    const map: Record<string, string> = { 'Brouillon': 'draft', 'Envoyé': 'sent', 'Accepté': 'won', 'Refusé': 'lost', 'Facturé': 'won' };
+    return map[s] || s.toLowerCase();
+  };
+
+  // ============================================================
+  // 📥 CHARGEMENT DES DONNÉES
+  // ============================================================
 
   const loadClientData = async () => {
     try {
@@ -115,7 +242,7 @@ export default function ClientDetail() {
       }
 
       if (!teamId) {
-        alert('⚠️ Aucune équipe trouvée');
+        toast.error('Aucune équipe trouvée');
         setLoading(false);
         navigate('/clients');
         return;
@@ -123,28 +250,25 @@ export default function ClientDetail() {
       setCurrentTeamId(teamId);
 
       const clientDoc = await databases.getDocument(DATABASE_ID, 'clients', id!);
-      
       if (clientDoc.teamId !== teamId) {
-        alert('⚠️ Accès refusé : Ce client n\'appartient pas à votre équipe.');
+        toast.error('Accès refusé : Ce client n\'appartient pas à votre équipe.');
         setLoading(false);
         navigate('/clients');
         return;
       }
 
       setClient(clientDoc as unknown as Client);
-
       const clientName = `${clientDoc.firstName || ''} ${clientDoc.lastName || ''}`.trim() || clientDoc.companyName || '';
-      
+
       try {
         const quotesRes = await databases.listDocuments(DATABASE_ID, 'quotes', [
-          Query.equal('teamId', teamId),
-          Query.orderDesc('$createdAt'),
-          Query.limit(500)
+          Query.equal('teamId', teamId), Query.orderDesc('$createdAt'), Query.limit(500)
         ]);
         const clientQuotes = quotesRes.documents.filter((q: any) => {
-          if (clientDoc.prospectId && q.prospectId === clientDoc.prospectId) return true;
-          if (q.clientName && clientName && q.clientName === clientName) return true;
           if (q.clientId === clientDoc.$id) return true;
+          if (clientDoc.prospectId && q.prospectId === clientDoc.prospectId) return true;
+          if (q.clientName && clientName && String(q.clientName).trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
+          if (q.clientEmail && clientDoc.email && String(q.clientEmail).trim().toLowerCase() === String(clientDoc.email).trim().toLowerCase()) return true;
           return false;
         });
         setQuotes(clientQuotes as unknown as Quote[]);
@@ -152,58 +276,130 @@ export default function ClientDetail() {
 
       try {
         const invoicesRes = await databases.listDocuments(DATABASE_ID, 'invoices', [
-          Query.equal('teamId', teamId),
-          Query.orderDesc('$createdAt'),
-          Query.limit(500)
+          Query.equal('teamId', teamId), Query.orderDesc('$createdAt'), Query.limit(500)
         ]);
         const clientInvoices = invoicesRes.documents.filter((inv: any) => {
-          if (inv.clientName && clientName && inv.clientName === clientName) return true;
           if (inv.clientId === clientDoc.$id) return true;
+          if (inv.clientName && clientName && String(inv.clientName).trim().toLowerCase() === clientName.trim().toLowerCase()) return true;
           return false;
         });
         setInvoices(clientInvoices as unknown as Invoice[]);
       } catch (e) { console.warn('Erreur chargement factures:', e); }
 
+      let metaDocs: any[] = [];
+      try {
+        const metaRes = await databases.listDocuments(DATABASE_ID, 'invoice_metadata', [Query.equal('teamId', teamId), Query.limit(2000)]);
+        metaDocs = metaRes.documents;
+      } catch { metaDocs = []; }
+
+      let journalDocs: any[] = [];
+      try {
+        const journalRes = await databases.listDocuments(DATABASE_ID, 'invoice_payments', [Query.equal('teamId', teamId), Query.limit(2000)]);
+        journalDocs = journalRes.documents;
+      } catch { journalDocs = []; }
+
+      const map = new Map<string, any>();
+      metaDocs.forEach((d: any) => {
+        map.set(d.invoiceId, {
+          creditData: readJson(d.creditData),
+          archiveData: readJson(d.archiveData),
+          reconciliationData: readJson(d.reconciliationData),
+        });
+      });
+      setMetadataMap(map);
+      setJournalPayments(journalDocs.map((d: any) => ({ ...readJson(d.data), $id: d.$id })));
+
     } catch (error: any) {
       console.error('Erreur chargement client:', error);
-      alert(`Erreur : ${error.message}`);
+      toast.error(`Erreur : ${error.message}`);
       navigate('/clients');
     } finally {
       setLoading(false);
     }
   };
 
-  const totalInvoiced = invoices.reduce((sum, inv) => sum + (inv.total || 0), 0);
-  const totalPaid = invoices.filter(inv => inv.status === 'paid').reduce((sum, inv) => sum + (inv.total || 0), 0);
-  const totalRemaining = totalInvoiced - totalPaid;
+  // ============================================================
+  // ✅ CALCULS HARMONISÉS
+  // ============================================================
+
+  const isSubjectToVAT = invoices.some(inv =>
+    inv.companyTva && inv.companyTva.trim() !== '' && !inv.companyTva.toLowerCase().includes('non applicable')
+  );
+  const vatBaseLabel = isSubjectToVAT ? 'HT' : 'TTC';
+  const amountOf = (inv: Invoice): number => isSubjectToVAT ? (inv.subtotal || 0) : (inv.total || 0);
+
+  const activeInvoices = invoices.filter(inv => !isDocArchived(inv));
+  const advancesWithFinal = new Set(
+    activeInvoices
+      .filter(i => (i.type === 'standard' || i.type === 'balance') && i.originalInvoiceId)
+      .filter(i => activeInvoices.some(a => a.$id === i.originalInvoiceId && a.type === 'advance'))
+      .map(i => i.originalInvoiceId!)
+  );
+  const originalsWithAdvance = new Set(
+    activeInvoices.filter(i => i.type === 'advance' && i.originalInvoiceId).map(i => i.originalInvoiceId!)
+  );
+  const revenueInvoicesAll = activeInvoices.filter(i => i.type === 'standard' || i.type === 'advance' || i.type === 'balance');
+  const revenueInvoices = revenueInvoicesAll.filter(i => {
+    if (i.type === 'advance' && advancesWithFinal.has(i.$id)) return false;
+    if ((i.type === 'standard' || i.type === 'balance') && originalsWithAdvance.has(i.$id)) return false;
+    return true;
+  });
+  const creditInvoices = activeInvoices.filter(inv => inv.type === 'credit');
+
+  const totalInvoiced = round2(revenueInvoices.reduce((s, inv) => s + amountOf(inv), 0));
+  const totalEncaisse = round2(revenueInvoices.reduce((s, inv) => s + Math.min(getEffectivePaidAmount(inv), inv.total || 0), 0));
+  const totalRemaining = round2(revenueInvoices.reduce((s, inv) => s + getNetRemaining(inv), 0));
+  const totalAllocatedCredits = round2(revenueInvoices.reduce((s, inv) => s + getAllocatedCredits(inv.$id), 0));
+  const totalCreditsIssued = round2(creditInvoices.reduce((s, i) => s + (i.total || 0), 0));
+  const totalCreditsRefunded = round2(creditInvoices.reduce((s, i) => s + getCreditRefunded(i), 0));
+  const totalCreditsToRefund = round2(creditInvoices.reduce((s, i) => s + getCreditRefundable(i), 0));
   const acceptedQuotes = quotes.filter(q => q.status === 'Accepté' || q.status === 'Facturé').length;
 
-  const handleArchive = async () => {
-    if (!client) return;
-    if (!confirm(`Archiver le client "${client.firstName} ${client.lastName}" ?`)) return;
+  // ✅ Calculs de pagination
+  const quotesTotalPages = Math.max(1, Math.ceil(quotes.length / ITEMS_PER_PAGE));
+  const quotesStartIndex = (quotesPage - 1) * ITEMS_PER_PAGE;
+  const quotesEndIndex = quotesStartIndex + ITEMS_PER_PAGE;
+  const paginatedQuotes = quotes.slice(quotesStartIndex, quotesEndIndex);
+
+  const invoicesTotalPages = Math.max(1, Math.ceil(invoices.length / ITEMS_PER_PAGE));
+  const invoicesStartIndex = (invoicesPage - 1) * ITEMS_PER_PAGE;
+  const invoicesEndIndex = invoicesStartIndex + ITEMS_PER_PAGE;
+  const paginatedInvoices = invoices.slice(invoicesStartIndex, invoicesEndIndex);
+
+  const history = buildHistory();
+  const historyTotalPages = Math.max(1, Math.ceil(history.length / ITEMS_PER_PAGE));
+  const historyStartIndex = (historyPage - 1) * ITEMS_PER_PAGE;
+  const historyEndIndex = historyStartIndex + ITEMS_PER_PAGE;
+  const paginatedHistory = history.slice(historyStartIndex, historyEndIndex);
+
+  // ============================================================
+  // ⚙️ ACTIONS
+  // ============================================================
+
+  const handleArchiveConfirm = async () => {
+    if (!clientToArchive) return;
     try {
-      const doc = await databases.getDocument(DATABASE_ID, 'clients', client.$id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
-      await databases.updateDocument(DATABASE_ID, 'clients', client.$id, { status: 'archived' });
-      alert('✅ Client archivé');
+      const doc = await databases.getDocument(DATABASE_ID, 'clients', clientToArchive.$id);
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
+      await databases.updateDocument(DATABASE_ID, 'clients', clientToArchive.$id, { status: 'archived' });
+      toast.success('Client archivé');
+      setClientToArchive(null);
       navigate('/clients');
-    } catch (error: any) { alert(`Erreur : ${error.message}`); }
+    } catch (error: any) { toast.error(`Erreur : ${error.message}`); }
   };
 
   const handleUnarchive = async () => {
     if (!client) return;
     try {
       const doc = await databases.getDocument(DATABASE_ID, 'clients', client.$id);
-      if (doc.teamId !== currentTeamId) { alert('⚠️ Accès refusé'); return; }
+      if (doc.teamId !== currentTeamId) { toast.error('Accès refusé'); return; }
       await databases.updateDocument(DATABASE_ID, 'clients', client.$id, { status: 'active' });
       setClient({ ...client, status: 'active' });
-      alert('✅ Client désarchivé');
-    } catch (error: any) { alert(`Erreur : ${error.message}`); }
+      toast.success('Client désarchivé');
+    } catch (error: any) { toast.error(`Erreur : ${error.message}`); }
   };
 
-  const fm = (a: number) => `${a.toFixed(2)} €`;
-
-  const buildHistory = () => {
+  function buildHistory() {
     const items: any[] = [];
     quotes.forEach(q => {
       items.push({
@@ -217,11 +413,17 @@ export default function ClientDetail() {
       });
     });
     invoices.forEach(inv => {
+      const isCredit = inv.type === 'credit';
+      const cd = isCredit ? getCreditData(inv) : {};
       items.push({
         type: 'invoice',
+        docType: inv.type,
+        creditStatus: cd.creditStatus,
         date: inv.issueDate || inv.$createdAt || '',
-        title: `Facture ${inv.invoiceNumber}`,
-        subtitle: inv.clientName || '',
+        title: `Facture ${inv.invoiceNumber}${inv.type === 'advance' ? ' (Acompte)' : isCredit ? ' (Avoir)' : ''}`,
+        subtitle: isCredit
+          ? `${inv.clientName || ''}${cd.creditStatus ? ` — ${statusLabels[cd.creditStatus] || 'Avoir émis'}` : ''}`
+          : (inv.clientName || ''),
         amount: inv.total,
         status: inv.status,
         id: inv.$id
@@ -229,11 +431,11 @@ export default function ClientDetail() {
     });
     items.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
     return items;
-  };
+  }
 
-  if (permLoading || loading) {
+  if (permLoading || loading || settingsLoading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-slate-900">
+      <div className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-900">
         <div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Chargement...</div>
       </div>
     );
@@ -242,368 +444,414 @@ export default function ClientDetail() {
   if (!client) return null;
 
   const clientName = `${client.firstName || ''} ${client.lastName || ''}`.trim() || client.companyName || 'Client sans nom';
-  const history = buildHistory();
+
+  const tabs = [
+    { key: 'info', label: 'Informations', count: 1 },
+    { key: 'quotes', label: 'Devis', count: quotes.length },
+    { key: 'invoices', label: 'Factures', count: invoices.length },
+    { key: 'history', label: 'Historique', count: history.length },
+  ];
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900">
-      {/* HEADER STICKY OPTIMISÉ MOBILE */}
-      <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center gap-3">
-              <button onClick={() => navigate('/clients')} className="p-2 -ml-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
-                <ChevronLeft size={20} />
-              </button>
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 sm:w-12 sm:h-12 bg-cyan-100 dark:bg-cyan-900/40 rounded-full flex items-center justify-center flex-shrink-0">
-                  {client.type === 'entreprise' ? (
-                    <Building size={20} className="sm:w-6 sm:h-6 text-cyan-600 dark:text-cyan-400" />
-                  ) : (
-                    <User size={20} className="sm:w-6 sm:h-6 text-cyan-600 dark:text-cyan-400" />
-                  )}
-                </div>
-                <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="text-lg sm:text-2xl font-bold text-slate-900 dark:text-white">{clientName}</h1>
-                    {client.clientId && (
-                      <span className="inline-flex items-center gap-1 text-xs font-mono font-semibold text-cyan-700 dark:text-cyan-400 bg-cyan-50 dark:bg-cyan-900/30 px-2 py-0.5 rounded">
-                        <Hash size={12} />
-                        {client.clientId}
-                      </span>
-                    )}
-                    <span className={`inline-block px-2.5 py-0.5 rounded-full text-xs font-medium ${
-                      client.status === 'active' ? 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300' : 
-                      client.status === 'archived' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400' : 
-                      'bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300'
-                    }`}>
-                      {client.status === 'active' ? 'Actif' : client.status === 'archived' ? 'Archivé' : 'Inactif'}
-                    </span>
-                  </div>
-                  {client.companyName && client.type === 'particulier' && (
-                    <p className="text-sm text-slate-500 dark:text-slate-400">{client.companyName}</p>
-                  )}
-                </div>
-              </div>
-            </div>
-            
-            <div className="flex flex-wrap items-center gap-2">
-              {hasPermission('quotes.create') && client.status !== 'archived' && (
-                <button onClick={() => navigate(`/quotes?clientId=${client.$id}`)} className="flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 transition-colors flex active:scale-95">
-                  <FileText size={16} />
-                  <span className="hidden sm:inline">Nouveau devis</span>
-                  <span className="sm:hidden">Devis</span>
-                </button>
-              )}
-              {hasPermission('clients.edit') && client.status !== 'archived' && (
-                <button onClick={() => navigate(`/clients?edit=${client.$id}`)} className="flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors flex active:scale-95">
-                  <Edit2 size={16} />
-                  <span className="hidden sm:inline">Modifier</span>
-                </button>
-              )}
-              {hasPermission('clients.delete') && client.status !== 'archived' ? (
-                <button onClick={handleArchive} className="flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/50 transition-colors flex active:scale-95">
-                  <Archive size={16} />
-                  <span className="hidden sm:inline">Archiver</span>
-                </button>
-              ) : hasPermission('clients.delete') && client.status === 'archived' ? (
-                <button onClick={handleUnarchive} className="flex-1 sm:flex-none items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 transition-colors flex active:scale-95">
-                  <RotateCcw size={16} />
-                  <span className="hidden sm:inline">Désarchiver</span>
-                </button>
-              ) : null}
-            </div>
+      <PageHeader
+        icon={client.type === 'entreprise' ? Building : User}
+        iconColor="purple"
+        title={clientName}
+        description={
+          <div className="flex flex-wrap items-center gap-2 mt-1">
+            {client.clientId && (
+              <Badge tone="purple"><Hash size={10} className="mr-1" />{client.clientId}</Badge>
+            )}
+            <StatusIndicator status={client.status} />
+            {client.companyName && client.type === 'particulier' && (
+              <span className="text-sm text-slate-500 dark:text-slate-400">• {client.companyName}</span>
+            )}
           </div>
-        </div>
-      </header>
+        }
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <button onClick={() => navigate('/clients')} className="p-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors">
+              <ChevronLeft size={20} />
+            </button>
+            {hasPermission('quotes.create') && client.status !== 'archived' && (
+              <button onClick={() => navigate(`/quotes?clientId=${client.$id}`)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 active:scale-95 transition-all">
+                <FileText size={16} /> <span className="hidden sm:inline">Nouveau devis</span><span className="sm:hidden">Devis</span>
+              </button>
+            )}
+            {hasPermission('clients.edit') && client.status !== 'archived' && (
+              <button onClick={() => navigate(`/clients?edit=${client.$id}`)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">
+                <Edit2 size={16} /> <span className="hidden sm:inline">Modifier</span>
+              </button>
+            )}
+            {hasPermission('clients.delete') && client.status !== 'archived' ? (
+              <button onClick={() => setClientToArchive(client)} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-orange-700 dark:text-orange-400 bg-orange-50 dark:bg-orange-900/30 border border-orange-200 dark:border-orange-800 rounded-lg hover:bg-orange-100 dark:hover:bg-orange-900/50 active:scale-95 transition-all">
+                <Archive size={16} /> <span className="hidden sm:inline">Archiver</span>
+              </button>
+            ) : hasPermission('clients.delete') && client.status === 'archived' ? (
+              <button onClick={handleUnarchive} className="flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-green-700 dark:text-green-400 bg-green-50 dark:bg-green-900/30 border border-green-200 dark:border-green-800 rounded-lg hover:bg-green-100 dark:hover:bg-green-900/50 active:scale-95 transition-all">
+                <RotateCcw size={16} /> <span className="hidden sm:inline">Désarchiver</span>
+              </button>
+            ) : null}
+          </div>
+        }
+      />
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mb-6">
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 border-l-4 border-l-blue-500">
-            <div className="flex items-center justify-between">
+        <KPIGrid columns={4}>
+          <StatCell value={fm(totalInvoiced)} label={`Facturé (${vatBaseLabel})`} sublabel={`${revenueInvoices.length} facture(s) active(s)`} />
+          <StatCell value={fm(totalEncaisse)} label="Encaissé (TTC)" sublabel={`${revenueInvoices.filter(i => getEffectivePaidAmount(i) >= (i.total || 0) - 0.01).length} réglée(s)`} />
+          <StatCell value={fm(totalRemaining)} label="Reste à payer" sublabel={`${revenueInvoices.filter(i => getNetRemaining(i) > 0).length} en attente`} />
+          <StatCell value={acceptedQuotes} label="Devis acceptés" sublabel={`sur ${quotes.length} devis total`} />
+        </KPIGrid>
+
+        {/* Bannière Avoirs */}
+        {creditInvoices.length > 0 && (
+          <Alert tone="warning" icon={AlertCircle} title={`Avoirs du client (${creditInvoices.length})`} className="mb-6">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm mt-3">
               <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Total facturé</p>
-                <p className="text-lg sm:text-2xl font-bold text-slate-900 dark:text-white mt-1">{fm(totalInvoiced)}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Émis</p>
+                <p className="font-bold text-slate-900 dark:text-white">{fm(totalCreditsIssued)}</p>
               </div>
-              <Receipt size={24} className="text-blue-500 dark:text-blue-400 hidden sm:block" />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">{invoices.length} facture(s)</p>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 border-l-4 border-l-green-500">
-            <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Encaissé</p>
-                <p className="text-lg sm:text-2xl font-bold text-green-600 dark:text-green-400 mt-1">{fm(totalPaid)}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Imputés</p>
+                <p className="font-bold text-green-700 dark:text-green-300">{fm(totalAllocatedCredits)}</p>
               </div>
-              <CheckCircle2 size={24} className="text-green-500 dark:text-green-400 hidden sm:block" />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              {invoices.filter(i => i.status === 'paid').length} payée(s)
-            </p>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 border-l-4 border-l-red-500">
-            <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Reste à payer</p>
-                <p className="text-lg sm:text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{fm(totalRemaining)}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Remboursés</p>
+                <p className="font-bold text-red-700 dark:text-red-300">{fm(totalCreditsRefunded)}</p>
               </div>
-              <AlertCircle size={24} className="text-red-500 dark:text-red-400 hidden sm:block" />
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              {invoices.filter(i => i.status !== 'paid').length} en attente
-            </p>
-          </div>
-
-          <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 border-l-4 border-l-purple-500">
-            <div className="flex items-center justify-between">
               <div>
-                <p className="text-xs text-slate-500 dark:text-slate-400 uppercase font-semibold">Devis acceptés</p>
-                <p className="text-lg sm:text-2xl font-bold text-purple-600 dark:text-purple-400 mt-1">{acceptedQuotes}</p>
+                <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">À rembourser</p>
+                <p className="font-bold text-amber-700 dark:text-amber-300">{fm(totalCreditsToRefund)}</p>
               </div>
-              <TrendingUp size={24} className="text-purple-500 dark:text-purple-400 hidden sm:block" />
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
-              sur {quotes.length} devis total
-            </p>
-          </div>
-        </div>
+          </Alert>
+        )}
 
-        {/* CONTENU PRINCIPAL AVEC ONGLETS */}
-        <div className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 overflow-hidden">
-          {/* Navigation des onglets (scrollable sur mobile) */}
-          <div className="border-b border-slate-200 dark:border-slate-700 overflow-x-auto">
-            <nav className="flex min-w-max">
-              <button onClick={() => setActiveTab('info')} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'info' ? 'border-cyan-600 text-cyan-600 dark:text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-                <User className="inline mr-2" size={16} />
-                Informations
-              </button>
-              <button onClick={() => setActiveTab('quotes')} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'quotes' ? 'border-cyan-600 text-cyan-600 dark:text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-                <FileText className="inline mr-2" size={16} />
-                Devis ({quotes.length})
-              </button>
-              <button onClick={() => setActiveTab('invoices')} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'invoices' ? 'border-cyan-600 text-cyan-600 dark:text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-                <Receipt className="inline mr-2" size={16} />
-                Factures ({invoices.length})
-              </button>
-              <button onClick={() => setActiveTab('history')} className={`px-4 sm:px-6 py-3 text-sm font-medium border-b-2 transition-colors ${activeTab === 'history' ? 'border-cyan-600 text-cyan-600 dark:text-cyan-400' : 'border-transparent text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'}`}>
-                <Clock className="inline mr-2" size={16} />
-                Historique ({history.length})
-              </button>
-            </nav>
-          </div>
+        {/* Onglets */}
+        <TypeTabs tabs={tabs} activeTab={activeTab} onTabChange={(k) => setActiveTab(k as any)} color="purple" />
 
-          <div className="p-4 sm:p-6">
-            {/* ONGLET INFOS */}
-            {activeTab === 'info' && (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase mb-3">Coordonnées</h3>
-                  <div className="space-y-3">
-                    {client.email && (
-                      <div className="flex items-center gap-3 text-sm">
-                        <Mail size={16} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
-                        <a href={`mailto:${client.email}`} className="text-cyan-600 dark:text-cyan-400 hover:underline truncate">{client.email}</a>
+        <div className="mt-6">
+          {activeTab === 'info' && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <SectionTitle icon={User}>Coordonnées</SectionTitle>
+                <div className="space-y-3">
+                  {client.email && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <Mail size={16} className="text-slate-400 flex-shrink-0" />
+                      <a href={`mailto:${client.email}`} className="text-purple-600 dark:text-purple-400 hover:underline truncate">{client.email}</a>
+                    </div>
+                  )}
+                  {client.phone && (
+                    <div className="flex items-center gap-3 text-sm">
+                      <Phone size={16} className="text-slate-400 flex-shrink-0" />
+                      <a href={`tel:${client.phone}`} className="text-purple-600 dark:text-purple-400 hover:underline">{client.phone}</a>
+                    </div>
+                  )}
+                  {client.address && (
+                    <div className="flex items-start gap-3 text-sm">
+                      <MapPin size={16} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                      <span className="text-slate-700 dark:text-slate-300">{client.address}</span>
+                    </div>
+                  )}
+                  {client.billingAddress && client.billingAddress !== client.address && (
+                    <div className="flex items-start gap-3 text-sm">
+                      <Building size={16} className="text-slate-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Adresse de facturation</p>
+                        <p className="text-slate-700 dark:text-slate-300">{client.billingAddress}</p>
                       </div>
-                    )}
-                    {client.phone && (
-                      <div className="flex items-center gap-3 text-sm">
-                        <Phone size={16} className="text-slate-400 dark:text-slate-500 flex-shrink-0" />
-                        <a href={`tel:${client.phone}`} className="text-cyan-600 dark:text-cyan-400 hover:underline">{client.phone}</a>
-                      </div>
-                    )}
-                    {client.address && (
-                      <div className="flex items-start gap-3 text-sm">
-                        <MapPin size={16} className="text-slate-400 dark:text-slate-500 mt-0.5 flex-shrink-0" />
-                        <span className="text-slate-700 dark:text-slate-300">{client.address}</span>
-                      </div>
-                    )}
-                    {client.billingAddress && client.billingAddress !== client.address && (
-                      <div className="flex items-start gap-3 text-sm">
-                        <Building size={16} className="text-slate-400 dark:text-slate-500 mt-0.5 flex-shrink-0" />
-                        <div>
-                          <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Adresse de facturation</p>
-                          <p className="text-slate-700 dark:text-slate-300">{client.billingAddress}</p>
-                        </div>
-                      </div>
-                    )}
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              <Card>
+                <SectionTitle icon={Building}>Informations légales</SectionTitle>
+                <div className="space-y-3 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Type</span>
+                    <TypeLabel type={client.type} />
+                  </div>
+                  {client.companyName && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">Entreprise</span>
+                      <span className="font-medium text-slate-900 dark:text-white">{client.companyName}</span>
+                    </div>
+                  )}
+                  {client.taxNumber && (
+                    <div className="flex justify-between">
+                      <span className="text-slate-500 dark:text-slate-400">N° Fiscal / TVA</span>
+                      <span className="font-mono text-xs text-slate-900 dark:text-white">{client.taxNumber}</span>
+                    </div>
+                  )}
+                  <div className="flex justify-between">
+                    <span className="text-slate-500 dark:text-slate-400">Client depuis</span>
+                    <span className="text-slate-900 dark:text-white">{formatDate(client.$createdAt)}</span>
                   </div>
                 </div>
+              </Card>
 
-                <div>
-                  <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase mb-3">Informations légales</h3>
-                  <div className="space-y-3 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 dark:text-slate-400">Type</span>
-                      <span className="text-slate-900 dark:text-white font-medium">{client.type === 'entreprise' ? 'Entreprise' : 'Particulier'}</span>
-                    </div>
-                    {client.companyName && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500 dark:text-slate-400">Entreprise</span>
-                        <span className="text-slate-900 dark:text-white font-medium">{client.companyName}</span>
-                      </div>
-                    )}
-                    {client.taxNumber && (
-                      <div className="flex justify-between">
-                        <span className="text-slate-500 dark:text-slate-400">N° Fiscal / TVA</span>
-                        <span className="text-slate-900 dark:text-white font-mono text-xs">{client.taxNumber}</span>
-                      </div>
-                    )}
-                    <div className="flex justify-between">
-                      <span className="text-slate-500 dark:text-slate-400">Client depuis</span>
-                      <span className="text-slate-900 dark:text-white">
-                        {client.$createdAt ? new Date(client.$createdAt).toLocaleDateString('fr-FR') : '-'}
-                      </span>
-                    </div>
+              {client.notes && (
+                <Card className="md:col-span-2">
+                  <SectionTitle icon={FileText}>Notes internes</SectionTitle>
+                  <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg p-4 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
+                    {client.notes}
                   </div>
-                </div>
+                </Card>
+              )}
+            </div>
+          )}
 
-                {client.notes && (
-                  <div className="md:col-span-2">
-                    <h3 className="text-sm font-semibold text-slate-500 dark:text-slate-400 uppercase mb-3">Notes internes</h3>
-                    <div className="bg-slate-50 dark:bg-slate-700/50 border border-slate-200 dark:border-slate-600 rounded-lg p-4 text-sm text-slate-700 dark:text-slate-300 whitespace-pre-wrap">
-                      {client.notes}
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ONGLET DEVIS */}
-            {activeTab === 'quotes' && (
-              <div>
-                {quotes.length === 0 ? (
-                  <div className="text-center py-12">
-                    <FileText size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
-                    <p className="text-slate-500 dark:text-slate-400">Aucun devis pour ce client</p>
-                    {hasPermission('quotes.create') && client.status !== 'archived' && (
-                      <button onClick={() => navigate(`/quotes?clientId=${client.$id}`)} className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-green-600 rounded-lg hover:bg-green-700 active:scale-95 transition-transform">
-                        <FileText size={16} />
-                        Créer un devis
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[600px]">
-                      <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                        <tr>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">N°</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Objet</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Date</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Total</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statut</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {quotes.map(q => (
-                          <tr key={q.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                            <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{q.quoteNumber}</td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{q.subject || '-'}</td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{q.issueDate || '-'}</td>
-                            <td className="px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white">{fm(q.total)}</td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[q.status] || 'bg-gray-100 text-gray-800'}`}>
-                                {quoteStatusLabels[q.status] || q.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ONGLET FACTURES */}
-            {activeTab === 'invoices' && (
-              <div>
-                {invoices.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Receipt size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
-                    <p className="text-slate-500 dark:text-slate-400">Aucune facture pour ce client</p>
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[600px]">
-                      <thead className="bg-slate-50 dark:bg-slate-900/50 border-b border-slate-200 dark:border-slate-700">
-                        <tr>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">N°</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Date</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Échéance</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Total</th>
-                          <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 dark:text-slate-400 uppercase">Statut</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 dark:divide-slate-700">
-                        {invoices.map(inv => (
-                          <tr key={inv.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                            <td className="px-4 py-3 text-sm font-medium text-slate-900 dark:text-white">{inv.invoiceNumber}</td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{inv.issueDate || '-'}</td>
-                            <td className="px-4 py-3 text-sm text-slate-600 dark:text-slate-300">{inv.dueDate || '-'}</td>
-                            <td className="px-4 py-3 text-sm font-semibold text-slate-900 dark:text-white">{fm(inv.total)}</td>
-                            <td className="px-4 py-3">
-                              <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium ${statusColors[inv.status] || 'bg-gray-100 text-gray-800'}`}>
-                                {invoiceStatusLabels[inv.status] || inv.status}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* ONGLET HISTORIQUE */}
-            {activeTab === 'history' && (
-              <div>
-                {history.length === 0 ? (
-                  <div className="text-center py-12">
-                    <Clock size={48} className="mx-auto text-slate-300 dark:text-slate-600 mb-4" />
-                    <p className="text-slate-500 dark:text-slate-400">Aucun historique pour ce client</p>
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {history.map((item, idx) => (
-                      <div key={idx} className="flex items-start gap-4 p-4 bg-slate-50 dark:bg-slate-700/50 rounded-lg border border-slate-200 dark:border-slate-600">
-                        <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
-                          item.type === 'quote' ? 'bg-green-100 dark:bg-green-900/40' : 'bg-purple-100 dark:bg-purple-900/40'
-                        }`}>
-                          {item.type === 'quote' ? (
-                            <FileText size={18} className="text-green-600 dark:text-green-400" />
-                          ) : (
-                            <Receipt size={18} className="text-purple-600 dark:text-purple-400" />
-                          )}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                            <p className="font-medium text-slate-900 dark:text-white truncate">{item.title}</p>
-                            <span className={`inline-block px-2.5 py-1 rounded-full text-xs font-medium w-fit ${statusColors[item.status] || 'bg-gray-100 text-gray-800'}`}>
-                              {item.type === 'quote' ? (quoteStatusLabels[item.status] || item.status) : (invoiceStatusLabels[item.status] || item.status)}
-                            </span>
-                          </div>
-                          {item.subtitle && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 truncate">{item.subtitle}</p>}
-                          <div className="flex items-center justify-between mt-2">
-                            <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
-                              <Calendar size={12} />
-                              {item.date ? new Date(item.date).toLocaleDateString('fr-FR') : '-'}
-                            </p>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white">{fm(item.amount)}</p>
-                          </div>
-                        </div>
-                      </div>
+          {activeTab === 'quotes' && (
+            quotes.length === 0 ? (
+              <EmptyState 
+                icon={FileText} 
+                title="Aucun devis pour ce client" 
+                action={hasPermission('quotes.create') && client.status !== 'archived' ? (
+                  <button onClick={() => navigate(`/quotes?clientId=${client.$id}`)} className="mt-4 inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium text-white bg-purple-600 rounded-lg hover:bg-purple-700 active:scale-95 transition-all">
+                    <FileText size={16} /> Créer un devis
+                  </button>
+                ) : null} 
+              />
+            ) : (
+              <>
+                {/* Desktop */}
+                <Card padding={false} className="hidden md:block">
+                  <DataTable headers={[
+                    { label: 'N°', align: 'left' },
+                    { label: 'Objet', align: 'left' },
+                    { label: 'Date', align: 'left' },
+                    { label: `Total (${currency})`, align: 'right' },
+                    { label: 'Statut', align: 'left' }
+                  ]}>
+                    {paginatedQuotes.map(q => (
+                      <tr key={q.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                        <td className="px-6 py-4">
+                          <Badge tone="purple"><Hash size={10} className="mr-1"/>{q.quoteNumber}</Badge>
+                        </td>
+                        <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{q.subject || '-'}</td>
+                        <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(q.issueDate)}</td>
+                        <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white text-right">{fm(q.total)}</td>
+                        <td className="px-6 py-4">
+                          <StatusIndicator status={mapQuoteStatus(q.status)} />
+                        </td>
+                      </tr>
                     ))}
-                  </div>
+                  </DataTable>
+                </Card>
+
+                {/* Mobile */}
+                <div className="md:hidden space-y-3">
+                  {paginatedQuotes.map(q => (
+                    <MobileCard key={q.$id}>
+                      <div className="flex justify-between items-start mb-3">
+                        <div className="flex-1 min-w-0">
+                          <Badge tone="purple" className="mb-2"><Hash size={10} className="mr-1"/>{q.quoteNumber}</Badge>
+                          <p className="text-sm text-slate-600 dark:text-slate-300 truncate">{q.subject || 'Sans objet'}</p>
+                        </div>
+                        <StatusIndicator status={mapQuoteStatus(q.status)} />
+                      </div>
+                      <div className="flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-700">
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{formatDate(q.issueDate)}</span>
+                        <span className="text-sm font-bold text-slate-900 dark:text-white">{fm(q.total)}</span>
+                      </div>
+                    </MobileCard>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {quotesTotalPages > 1 && (
+                  <Pagination
+                    currentPage={quotesPage}
+                    totalPages={quotesTotalPages}
+                    onPageChange={setQuotesPage}
+                    startItem={quotesStartIndex + 1}
+                    endItem={Math.min(quotesEndIndex, quotes.length)}
+                    totalItems={quotes.length}
+                    itemName="devis"
+                  />
                 )}
-              </div>
-            )}
-          </div>
+              </>
+            )
+          )}
+
+          {activeTab === 'invoices' && (
+            invoices.length === 0 ? (
+              <EmptyState icon={Receipt} title="Aucune facture pour ce client" />
+            ) : (
+              <>
+                {/* Desktop */}
+                <Card padding={false} className="hidden md:block">
+                  <DataTable headers={[
+                    { label: 'N°', align: 'left' },
+                    { label: 'Type', align: 'left' },
+                    { label: 'Date', align: 'left' },
+                    { label: `Total (${currency})`, align: 'right' },
+                    { label: `Reste (${currency})`, align: 'right' },
+                    { label: 'Statut', align: 'left' }
+                  ]}>
+                    {paginatedInvoices.map(inv => {
+                      const isCredit = inv.type === 'credit';
+                      const cd = isCredit ? getCreditData(inv) : {};
+                      const archived = isDocArchived(inv);
+                      const mappedStatus = mapInvoiceStatusToShared(inv.status, inv.type, cd.creditStatus);
+                      return (
+                        <tr key={inv.$id} className={`hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors ${archived ? 'opacity-60' : ''}`}>
+                          <td className="px-6 py-4">
+                            <Badge tone="purple"><Hash size={10} className="mr-1"/>{inv.invoiceNumber}</Badge>
+                          </td>
+                          <td className="px-6 py-4">
+                            <TypeLabel type={inv.type || 'standard'} />
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-600 dark:text-slate-300">{formatDate(inv.issueDate)}</td>
+                          <td className="px-6 py-4 text-sm font-semibold text-slate-900 dark:text-white text-right">{fm(inv.total)}</td>
+                          <td className="px-6 py-4 text-sm font-medium text-right">
+                            {isCredit ? (
+                              <span className="text-orange-600 dark:text-orange-400" title="Reste à rembourser au client">
+                                {fm(getCreditRefundable(inv))}
+                              </span>
+                            ) : (
+                              <span className="text-red-600 dark:text-red-400">{fm(getNetRemaining(inv))}</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4">
+                            <StatusIndicator status={mappedStatus} />
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </DataTable>
+                </Card>
+
+                {/* Mobile */}
+                <div className="md:hidden space-y-3">
+                  {paginatedInvoices.map(inv => {
+                    const isCredit = inv.type === 'credit';
+                    const cd = isCredit ? getCreditData(inv) : {};
+                    const archived = isDocArchived(inv);
+                    const mappedStatus = mapInvoiceStatusToShared(inv.status, inv.type, cd.creditStatus);
+                    return (
+                      <MobileCard key={inv.$id} className={archived ? 'opacity-60' : ''}>
+                        <div className="flex justify-between items-start mb-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-2 flex-wrap">
+                              <Badge tone="purple"><Hash size={10} className="mr-1"/>{inv.invoiceNumber}</Badge>
+                              <TypeLabel type={inv.type || 'standard'} />
+                            </div>
+                          </div>
+                          <StatusIndicator status={mappedStatus} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-slate-100 dark:border-slate-700 text-sm">
+                          <div>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Date</p>
+                            <p className="font-medium text-slate-900 dark:text-white">{formatDate(inv.issueDate)}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">Total</p>
+                            <p className="font-bold text-slate-900 dark:text-white">{fm(inv.total)}</p>
+                          </div>
+                          <div className="col-span-2">
+                            <p className="text-[10px] text-slate-500 dark:text-slate-400 uppercase">
+                              {isCredit ? 'À rembourser' : 'Reste à payer'}
+                            </p>
+                            <p className={`font-bold ${isCredit ? 'text-orange-600 dark:text-orange-400' : 'text-red-600 dark:text-red-400'}`}>
+                              {isCredit ? fm(getCreditRefundable(inv)) : fm(getNetRemaining(inv))}
+                            </p>
+                          </div>
+                        </div>
+                      </MobileCard>
+                    );
+                  })}
+                </div>
+
+                {/* Pagination */}
+                {invoicesTotalPages > 1 && (
+                  <Pagination
+                    currentPage={invoicesPage}
+                    totalPages={invoicesTotalPages}
+                    onPageChange={setInvoicesPage}
+                    startItem={invoicesStartIndex + 1}
+                    endItem={Math.min(invoicesEndIndex, invoices.length)}
+                    totalItems={invoices.length}
+                    itemName="facture"
+                  />
+                )}
+              </>
+            )
+          )}
+
+          {activeTab === 'history' && (
+            history.length === 0 ? (
+              <EmptyState icon={Clock} title="Aucun historique pour ce client" />
+            ) : (
+              <>
+                <div className="space-y-3">
+                  {paginatedHistory.map((item, idx) => (
+                    <Card key={idx} className="flex items-start gap-4">
+                      <div className={`w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0 ${
+                        item.type === 'quote' ? 'bg-indigo-50 dark:bg-indigo-500/10' : 'bg-violet-50 dark:bg-violet-500/10'
+                      }`}>
+                        {item.type === 'quote' ? (
+                          <FileText size={18} className="text-indigo-600 dark:text-indigo-400" />
+                        ) : (
+                          <Receipt size={18} className="text-violet-600 dark:text-violet-400" />
+                        )}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                          <p className="font-medium text-slate-900 dark:text-white truncate">{item.title}</p>
+                          <StatusIndicator status={item.type === 'quote' ? mapQuoteStatus(item.status) : mapInvoiceStatusToShared(item.status, item.docType, item.creditStatus)} />
+                        </div>
+                        {item.subtitle && <p className="text-sm text-slate-600 dark:text-slate-400 mt-1 truncate">{item.subtitle}</p>}
+                        <div className="flex items-center justify-between mt-2">
+                          <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1">
+                            <Calendar size={12} /> {formatDate(item.date)}
+                          </p>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white">{fm(item.amount)}</p>
+                        </div>
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+
+                {/* Pagination */}
+                {historyTotalPages > 1 && (
+                  <Pagination
+                    currentPage={historyPage}
+                    totalPages={historyTotalPages}
+                    onPageChange={setHistoryPage}
+                    startItem={historyStartIndex + 1}
+                    endItem={Math.min(historyEndIndex, history.length)}
+                    totalItems={history.length}
+                    itemName="élément"
+                  />
+                )}
+              </>
+            )
+          )}
         </div>
       </main>
+
+      <ConfirmDialog
+        open={!!clientToArchive}
+        onClose={() => setClientToArchive(null)}
+        onConfirm={handleArchiveConfirm}
+        title="Archiver ce client ?"
+        description={
+          clientToArchive ? (
+            <>
+              Le client <strong className="text-slate-700 dark:text-slate-200">{clientToArchive.firstName} {clientToArchive.lastName}</strong> sera masqué de la liste principale. Son historique et ses documents seront conservés.
+            </>
+          ) : null
+        }
+        confirmLabel="Confirmer"
+        cancelLabel="Annuler"
+        tone="danger"
+      />
     </div>
   );
 }

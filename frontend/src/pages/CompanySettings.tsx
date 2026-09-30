@@ -1,16 +1,37 @@
-import Sidebar from '../components/Sidebar';
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { databases, DATABASE_ID, storage } from '../appwrite';
 import { useAuth } from '../context/AuthContext';
 import { usePermissions } from '../hooks/usePermissions';
 import { getFilePreviewUrl } from '../utils/storage';
-import { Building2, Save, AlertCircle, CheckCircle2, Upload, Image as ImageIcon, X, Copy, Lock, Plus, Trash2, Globe, Coins } from 'lucide-react';
+import { toast } from 'sonner';
+import Sidebar from '../components/Sidebar';
+import Modal from '../components/ui/Modal';
+import ActionMenu, { ActionMenuItem } from '../components/ui/ActionMenu';
+import {
+  PageHeader,
+  TypeTabs,
+  EmptyState,
+  ConfirmDialog,
+  FormField,
+  Input,
+  Select,
+  Alert,
+  Card,
+  SectionTitle,
+  Badge,
+  type Entity,
+} from '../components/ui/SharedUI';
+import {
+  Building2, Save, AlertCircle, CheckCircle2, Upload, Image as ImageIcon,
+  X, Copy, Lock, Plus, Trash2, Globe, Coins, FileText, Eye, Edit2, Target
+} from 'lucide-react';
 import { ID, Query, Permission, Role } from 'appwrite';
 
 // ============================================================
-// 🌍 CONFIGURATION DEVISES (exportée pour usage dans toute l'app)
+// 🌍 CONFIGURATION DEVISES
 // ============================================================
+
 export interface Currency {
   code: string;
   symbol: string;
@@ -19,26 +40,26 @@ export interface Currency {
 }
 
 export const SUPPORTED_CURRENCIES: Currency[] = [
-  { code: 'EUR', symbol: '€',    name: 'Euro (€)',                   locale: 'fr-FR' },
-  { code: 'XOF', symbol: 'FCFA', name: 'Franc CFA BCEAO (FCFA)',     locale: 'fr-FR' },
-  { code: 'XAF', symbol: 'FCFA', name: 'Franc CFA BEAC (FCFA)',      locale: 'fr-FR' },
-  { code: 'USD', symbol: '$',    name: 'Dollar US ($)',              locale: 'en-US' },
-  { code: 'GBP', symbol: '£',    name: 'Livre sterling (£)',         locale: 'en-GB' },
-  { code: 'CAD', symbol: '$CA',  name: 'Dollar canadien ($CA)',      locale: 'fr-CA' },
-  { code: 'CHF', symbol: 'CHF',  name: 'Franc suisse (CHF)',         locale: 'de-CH' },
-  { code: 'MAD', symbol: 'DH',   name: 'Dirham marocain (DH)',       locale: 'fr-MA' },
-  { code: 'TND', symbol: 'DT',   name: 'Dinar tunisien (DT)',        locale: 'ar-TN' },
-  { code: 'DZD', symbol: 'DA',   name: 'Dinar algérien (DA)',        locale: 'ar-DZ' },
-  { code: 'JPY', symbol: '¥',    name: 'Yen japonais (¥)',           locale: 'ja-JP' },
-  { code: 'CNY', symbol: '¥',    name: 'Yuan chinois (¥)',           locale: 'zh-CN' },
-  { code: 'INR', symbol: '₹',    name: 'Roupie indienne (₹)',        locale: 'hi-IN' },
-  { code: 'BRL', symbol: 'R$',   name: 'Réal brésilien (R$)',        locale: 'pt-BR' },
-  { code: 'MXN', symbol: '$MX',  name: 'Peso mexicain ($MX)',        locale: 'es-MX' },
-  { code: 'AUD', symbol: '$AU',  name: 'Dollar australien ($AU)',    locale: 'en-AU' },
-  { code: 'TRY', symbol: '₺',    name: 'Livre turque (₺)',           locale: 'tr-TR' },
-  { code: 'PLN', symbol: 'zł',   name: 'Zloty polonais (zł)',        locale: 'pl-PL' },
-  { code: 'SEK', symbol: 'kr',   name: 'Couronne suédoise (kr)',     locale: 'sv-SE' },
-  { code: 'NOK', symbol: 'kr',   name: 'Couronne norvégienne (kr)',  locale: 'nb-NO' },
+  { code: 'EUR', symbol: '€', name: 'Euro (€)', locale: 'fr-FR' },
+  { code: 'XOF', symbol: 'FCFA', name: 'Franc CFA BCEAO (FCFA)', locale: 'fr-FR' },
+  { code: 'XAF', symbol: 'FCFA', name: 'Franc CFA BEAC (FCFA)', locale: 'fr-FR' },
+  { code: 'USD', symbol: '$', name: 'Dollar US ($)', locale: 'en-US' },
+  { code: 'GBP', symbol: '£', name: 'Livre sterling (£)', locale: 'en-GB' },
+  { code: 'CAD', symbol: '$CA', name: 'Dollar canadien ($CA)', locale: 'fr-CA' },
+  { code: 'CHF', symbol: 'CHF', name: 'Franc suisse (CHF)', locale: 'de-CH' },
+  { code: 'MAD', symbol: 'DH', name: 'Dirham marocain (DH)', locale: 'fr-MA' },
+  { code: 'TND', symbol: 'DT', name: 'Dinar tunisien (DT)', locale: 'ar-TN' },
+  { code: 'DZD', symbol: 'DA', name: 'Dinar algérien (DA)', locale: 'ar-DZ' },
+  { code: 'JPY', symbol: '¥', name: 'Yen japonais (¥)', locale: 'ja-JP' },
+  { code: 'CNY', symbol: '¥', name: 'Yuan chinois (¥)', locale: 'zh-CN' },
+  { code: 'INR', symbol: '₹', name: 'Roupie indienne (₹)', locale: 'hi-IN' },
+  { code: 'BRL', symbol: 'R$', name: 'Réal brésilien (R$)', locale: 'pt-BR' },
+  { code: 'MXN', symbol: '$MX', name: 'Peso mexicain ($MX)', locale: 'es-MX' },
+  { code: 'AUD', symbol: '$AU', name: 'Dollar australien ($AU)', locale: 'en-AU' },
+  { code: 'TRY', symbol: '₺', name: 'Livre turque (₺)', locale: 'tr-TR' },
+  { code: 'PLN', symbol: 'zł', name: 'Zloty polonais (zł)', locale: 'pl-PL' },
+  { code: 'SEK', symbol: 'kr', name: 'Couronne suédoise (kr)', locale: 'sv-SE' },
+  { code: 'NOK', symbol: 'kr', name: 'Couronne norvégienne (kr)', locale: 'nb-NO' },
 ];
 
 export const getCurrencyConfig = (code: string): Currency => {
@@ -59,8 +80,42 @@ export const formatMoney = (amount: number, currencyCode: string = 'EUR'): strin
 };
 
 // ============================================================
+// ✅ VALIDATION SIREN/SIRET
+// ============================================================
+
+export const isValidSirenSiret = (value: string): boolean => {
+  const cleanValue = value.replace(/\s/g, '');
+  if (!/^\d{9}$|^\d{14}$/.test(cleanValue)) return false;
+  let sum = 0;
+  let isEven = false;
+  for (let i = cleanValue.length - 1; i >= 0; i--) {
+    let digit = parseInt(cleanValue.charAt(i), 10);
+    if (isEven) {
+      digit *= 2;
+      if (digit > 9) digit -= 9;
+    }
+    sum += digit;
+    isEven = !isEven;
+  }
+  return sum % 10 === 0;
+};
+
+export const formatSirenSiret = (value: string): string => {
+  const clean = value.replace(/\D/g, '');
+  if (clean.length === 9) return clean.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
+  if (clean.length === 14) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{5})/, '$1 $2 $3 $4');
+  return clean;
+};
+
+const isValidEmail = (email: string): boolean => {
+  const re = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return re.test(email);
+};
+
+// ============================================================
 // TVA & PAYS
 // ============================================================
+
 interface TvaRate {
   id: string;
   name: string;
@@ -90,13 +145,35 @@ const DEFAULT_TVA_RATES: TvaRate[] = [
 ];
 
 // ============================================================
-// COMPOSANT PRINCIPAL
+// TYPES D'ONGLETS
 // ============================================================
+
+type TabId = 'company' | 'vat' | 'currency';
+
+interface Tab {
+  id: TabId;
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+  count?: number;
+}
+
+const TABS: Tab[] = [
+  { id: 'company', label: 'Entreprise', icon: <Building2 size={18} />, description: 'Identité, logo et coordonnées' },
+  { id: 'vat', label: 'TVA', icon: <FileText size={18} />, description: 'Taux par pays' },
+  { id: 'currency', label: 'Devise', icon: <Coins size={18} />, description: 'Monnaie utilisée' },
+];
+
+// ============================================================
+// 🎯 COMPOSANT PRINCIPAL
+// ============================================================
+
 export default function CompanySettings() {
   const { user } = useAuth();
   const { hasPermission, loading: permLoading } = usePermissions();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -104,20 +181,23 @@ export default function CompanySettings() {
   const [error, setError] = useState('');
   const [existingDocId, setExistingDocId] = useState<string | null>(null);
   const [currentTeamId, setCurrentTeamId] = useState<string | null>(null);
-
+  const [activeTab, setActiveTab] = useState<TabId>('company');
+  const [isCheckingSiret, setIsCheckingSiret] = useState(false);
+  const [siretError, setSiretError] = useState('');
   const [formData, setFormData] = useState({
     name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '',
     tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '',
-    defaultTvaRate: '20', logoFileId: '', publicSlug: '',
-    currency: 'EUR'
+    defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
+    monthlyGoal: 5000
   });
-
   const [customTvaRates, setCustomTvaRates] = useState<TvaRate[]>(DEFAULT_TVA_RATES);
   const [showAddTvaModal, setShowAddTvaModal] = useState(false);
   const [editingTvaId, setEditingTvaId] = useState<string | null>(null);
   const [newTva, setNewTva] = useState<{ name: string; rate: string; country: string }>({ name: '', rate: '', country: 'FR' });
-
   const [logoPreview, setLogoPreview] = useState<string>('');
+  const [confirmDeleteTva, setConfirmDeleteTva] = useState<TvaRate | null>(null);
+
+  const defaultRateValid = customTvaRates.some(r => r.rate.toString() === formData.defaultTvaRate);
 
   useEffect(() => {
     if (!permLoading && !hasPermission('settings.view')) {
@@ -133,7 +213,6 @@ export default function CompanySettings() {
   const loadSettings = async () => {
     try {
       if (!user?.$id) return;
-      
       let teamId = null;
       const teamsRes = await databases.listDocuments(DATABASE_ID, 'teams', [Query.equal('ownerId', user.$id)]);
       if (teamsRes.documents.length > 0) teamId = teamsRes.documents[0].$id;
@@ -148,12 +227,17 @@ export default function CompanySettings() {
       if (response.documents.length === 0) {
         response = await databases.listDocuments(DATABASE_ID, 'company_settings', [Query.equal('userId', user.$id)]);
       }
-      const myDoc = response.documents[0];
 
+      const myDoc = response.documents[0];
       if (myDoc) {
         if (myDoc.teamId && myDoc.teamId !== teamId) {
           setExistingDocId(null);
-          setFormData({ name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR' });
+          setFormData({ 
+            name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', 
+            tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', 
+            defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
+            monthlyGoal: 5000
+          });
           setLogoPreview('');
           setCustomTvaRates(DEFAULT_TVA_RATES);
         } else {
@@ -164,10 +248,11 @@ export default function CompanySettings() {
             tvaNumber: myDoc.tvaNumber || 'TVA non applicable, art. 293 B du CGI',
             phone: myDoc.phone || '', email: myDoc.email || '', defaultTvaRate: myDoc.defaultTvaRate || '20',
             logoFileId: myDoc.logoFileId || '', publicSlug: myDoc.publicSlug || '',
-            currency: myDoc.currency || 'EUR'
+            currency: myDoc.currency || 'EUR',
+            monthlyGoal: myDoc.monthlyGoal || 5000
           });
           if (myDoc.logoFileId) {
-            try { setLogoPreview(getFilePreviewUrl('company_logos', myDoc.logoFileId)); } catch (e) { setLogoPreview(''); }
+            try { setLogoPreview(getFilePreviewUrl('company_logos', myDoc.logoFileId)); } catch { setLogoPreview(''); }
           }
           if (myDoc.tvaRates) {
             try {
@@ -180,11 +265,63 @@ export default function CompanySettings() {
         }
       } else {
         setExistingDocId(null);
-        setFormData({ name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR' });
+        setFormData({ 
+          name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', 
+          tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', 
+          defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
+          monthlyGoal: 5000
+        });
         setLogoPreview('');
         setCustomTvaRates(DEFAULT_TVA_RATES);
       }
     } catch (err) { console.error('Erreur chargement:', err); } finally { setLoading(false); }
+  };
+
+  const handleSiretChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const formatted = formatSirenSiret(e.target.value);
+    setFormData(prev => ({ ...prev, siret: formatted }));
+    setSiretError('');
+  };
+
+  const handleSiretBlur = async () => {
+    const cleanSiret = formData.siret.replace(/\s/g, '');
+    if (cleanSiret.length === 0) return;
+    if (!isValidSirenSiret(cleanSiret)) {
+      setSiretError('Le numéro SIREN/SIRET est mathématiquement invalide. Vérifiez les chiffres.');
+      return;
+    }
+    setIsCheckingSiret(true);
+    setSiretError('');
+    try {
+      const response = await fetch(`https://recherche-entreprises.api.gouv.fr/search?q=${cleanSiret}&per_page=1`);
+      const data = await response.json();
+      if (data.results && data.results.length > 0) {
+        const company = data.results[0];
+        const siege = company.siege;
+        const uniteLegale = company.unite_legale || {};
+        if (company.etat_administratif !== 'A') {
+          setSiretError('Cette entreprise est fermée administrativement. Vérifiez le numéro.');
+          return;
+        }
+        const fullAddress = `${siege?.libelle_voie || ''}, ${siege?.code_postal || ''} ${siege?.libelle_commune || ''}`.replace(/^, /, '').trim();
+        const apiTvaNumber = uniteLegale.tva_intracommunautaire;
+        const newTvaNumber = apiTvaNumber ? apiTvaNumber : 'TVA non applicable, art. 293 B du CGI';
+        setFormData(prev => ({
+          ...prev,
+          name: company.nom_complet || prev.name,
+          address: fullAddress || prev.address,
+          tvaNumber: newTvaNumber
+        }));
+        toast.success('Entreprise trouvée !', { description: 'Nom, adresse et statut TVA pré-remplis.' });
+      } else {
+        setSiretError('Entreprise introuvable dans le registre officiel. Vous pouvez remplir manuellement.');
+      }
+    } catch (err) {
+      console.error('Erreur vérification SIRET:', err);
+      setSiretError('Erreur de connexion au registre des entreprises.');
+    } finally {
+      setIsCheckingSiret(false);
+    }
   };
 
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -199,8 +336,7 @@ export default function CompanySettings() {
       if (formData.logoFileId) { try { await storage.deleteFile('company_logos', formData.logoFileId); } catch(e){} }
       const uploadedFile = await storage.createFile('company_logos', ID.unique(), file);
       setFormData(prev => ({ ...prev, logoFileId: uploadedFile.$id }));
-      setSuccess('Logo téléchargé ! N\'oubliez pas d\'enregistrer.');
-      setTimeout(() => setSuccess(''), 4000);
+      toast.success('Logo téléchargé !', { description: "N'oubliez pas d'enregistrer." });
     } catch (err: any) { setError(err.message); setLogoPreview(''); } finally { setUploading(false); if (fileInputRef.current) fileInputRef.current.value = ''; }
   };
 
@@ -221,8 +357,8 @@ export default function CompanySettings() {
 
   const handleSaveTva = () => {
     const rate = parseFloat(newTva.rate);
-    if (!newTva.name.trim()) { setError('Veuillez saisir un nom pour ce taux.'); return; }
-    if (isNaN(rate) || rate < 0 || rate > 100) { setError('Le taux doit être compris entre 0 et 100.'); return; }
+    if (!newTva.name.trim()) { toast.error('Veuillez saisir un nom pour ce taux.'); return; }
+    if (isNaN(rate) || rate < 0 || rate > 100) { toast.error('Le taux doit être compris entre 0 et 100.'); return; }
     if (editingTvaId) {
       setCustomTvaRates(prev => prev.map(t => t.id === editingTvaId ? { ...t, name: newTva.name.trim(), rate, country: newTva.country } : t));
     } else {
@@ -231,26 +367,42 @@ export default function CompanySettings() {
     setShowAddTvaModal(false);
     setEditingTvaId(null);
     setNewTva({ name: '', rate: '', country: 'FR' });
-    setSuccess('Taux de TVA mis à jour ! N\'oubliez pas d\'enregistrer.');
-    setTimeout(() => setSuccess(''), 3000);
+    toast.success('Taux de TVA mis à jour !', { description: "N'oubliez pas d'enregistrer." });
   };
 
-  const handleDeleteTva = (id: string) => {
-    if (customTvaRates.length <= 1) { setError('Vous devez conserver au moins un taux de TVA.'); return; }
-    if (!confirm('Supprimer ce taux de TVA ?')) return;
-    const rateToDelete = customTvaRates.find(t => t.id === id);
-    setCustomTvaRates(prev => prev.filter(t => t.id !== id));
-    if (rateToDelete && formData.defaultTvaRate === rateToDelete.rate.toString()) {
-      const remaining = customTvaRates.filter(t => t.id !== id);
+  const handleDeleteTvaConfirm = () => {
+    if (!confirmDeleteTva) return;
+    if (customTvaRates.length <= 1) { toast.error('Vous devez conserver au moins un taux de TVA.'); setConfirmDeleteTva(null); return; }
+    const rateToDelete = confirmDeleteTva;
+    setCustomTvaRates(prev => prev.filter(t => t.id !== rateToDelete.id));
+    if (formData.defaultTvaRate === rateToDelete.rate.toString()) {
+      const remaining = customTvaRates.filter(t => t.id !== rateToDelete.id);
       if (remaining.length > 0) setFormData(prev => ({ ...prev, defaultTvaRate: remaining[0].rate.toString() }));
     }
-    setSuccess('Taux supprimé ! N\'oubliez pas d\'enregistrer.');
-    setTimeout(() => setSuccess(''), 3000);
+    setConfirmDeleteTva(null);
+    toast.success('Taux supprimé !', { description: "N'oubliez pas d'enregistrer." });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!user?.$id || !currentTeamId) { setError('Erreur de session ou d\'équipe.'); return; }
+    if (!user?.$id || !currentTeamId) { toast.error('Erreur de session ou d\'équipe.'); return; }
+
+    if (formData.siret && !isValidSirenSiret(formData.siret)) {
+      toast.error('Le numéro SIREN/SIRET est invalide.');
+      setActiveTab('company');
+      return;
+    }
+    if (formData.email && !isValidEmail(formData.email)) {
+      toast.error('L\'adresse email est invalide.');
+      setActiveTab('company');
+      return;
+    }
+    if (!defaultRateValid) {
+      toast.error('Le taux de TVA par défaut n\'existe pas dans votre liste.');
+      setActiveTab('vat');
+      return;
+    }
+
     setSaving(true); setError(''); setSuccess('');
     try {
       const payload = { ...formData, userId: user.$id, teamId: currentTeamId, tvaRates: JSON.stringify(customTvaRates) };
@@ -267,18 +419,33 @@ export default function CompanySettings() {
       } else {
         await databases.createDocument(DATABASE_ID, 'company_settings', ID.unique(), payload, perms);
       }
-      setSuccess('Paramètres enregistrés avec succès !');
-      setTimeout(() => setSuccess(''), 3000);
-    } catch (err: any) { setError(`Erreur: ${err.message}`); } finally { setSaving(false); }
+      toast.success('Paramètres enregistrés avec succès !');
+    } catch (err: any) { toast.error(`Erreur: ${err.message}`); } finally { setSaving(false); }
   };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    const target = e.target as HTMLInputElement;
+    const value = target.type === 'number' ? parseFloat(target.value) || 0 : target.value;
+    setFormData({ ...formData, [target.name]: value });
   };
 
-  if (permLoading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div></div></Sidebar>;
+  if (permLoading) return (
+    <Sidebar>
+      <div className="flex items-center justify-center h-full w-full">
+        <div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Vérification des droits...</div>
+      </div>
+    </Sidebar>
+  );
+
   if (!hasPermission('settings.view')) return null;
-  if (loading) return <Sidebar><div className="flex items-center justify-center h-full w-full"><div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Chargement...</div></div></Sidebar>;
+
+  if (loading) return (
+    <Sidebar>
+      <div className="flex items-center justify-center h-full w-full">
+        <div className="text-slate-500 dark:text-slate-400 text-lg animate-pulse">Chargement...</div>
+      </div>
+    </Sidebar>
+  );
 
   const canEdit = hasPermission('settings.edit');
   const ratesByCountry = customTvaRates.reduce((acc, rate) => {
@@ -288,313 +455,439 @@ export default function CompanySettings() {
     return acc;
   }, {} as Record<string, { country: typeof COUNTRIES[0]; rates: TvaRate[] }>);
 
+  const currentCurrency = getCurrencyConfig(formData.currency);
+
   return (
     <Sidebar>
       <div className="min-h-full bg-slate-50 dark:bg-slate-900">
-        <header className="bg-white dark:bg-slate-800 shadow-sm border-b border-slate-200 dark:border-slate-700 sticky top-0 z-20">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
-            <div className="flex items-center gap-3">
-              <div>
-                <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Building2 size={24} className="text-purple-600" /> 
-                  Mon Entreprise
-                </h1>
-                <p className="text-sm text-slate-500 dark:text-slate-400">Ces informations pré-rempliront automatiquement vos devis et factures.</p>
-              </div>
-            </div>
-          </div>
-        </header>
+        <PageHeader
+          icon={Building2}
+          iconColor="purple"
+          title="Mon Entreprise"
+          description="Ces informations pré-rempliront automatiquement vos devis et factures."
+        />
 
         <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8">
           {!canEdit && (
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-200 px-4 py-3 rounded-lg flex items-center gap-2 mb-6">
-              <Lock size={18} className="flex-shrink-0" />
-              <span className="text-sm font-medium">Mode lecture seule.</span>
-            </div>
+            <Alert tone="warning" icon={Lock} title="Mode lecture seule" className="mb-6">
+              Vous n'avez pas les permissions pour modifier ces paramètres.
+            </Alert>
           )}
 
-          <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 rounded-xl shadow-sm border border-slate-200 dark:border-slate-700 p-4 sm:p-6 space-y-6">
-            {success && (
-              <div className="bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 text-green-700 dark:text-green-300 px-4 py-3 rounded-lg flex items-center gap-2 animate-fadeIn">
-                <CheckCircle2 size={18} className="flex-shrink-0" />
-                <span className="text-sm font-medium">{success}</span>
-              </div>
-            )}
-            {error && (
-              <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 px-4 py-3 rounded-lg flex items-center gap-2 animate-fadeIn">
-                <AlertCircle size={18} className="flex-shrink-0" />
-                <span className="text-sm font-medium">{error}</span>
-              </div>
-            )}
+          {success && (
+            <Alert tone="success" icon={CheckCircle2} title={success} className="mb-4" />
+          )}
+          {error && (
+            <Alert tone="error" icon={AlertCircle} title={error} className="mb-4" />
+          )}
 
-            {/* LOGO */}
-            <div className="border-b border-slate-100 dark:border-slate-700 pb-6">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Logo de l'entreprise <span className="text-sm font-normal text-slate-500 dark:text-slate-400">(optionnel)</span></h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Ajoutez votre logo pour qu'il apparaisse sur vos devis.</p>
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
-                <div className="w-32 h-32 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-700/50 overflow-hidden flex-shrink-0">
-                  {logoPreview ? <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-2" /> : <ImageIcon size={40} className="text-slate-300 dark:text-slate-500" />}
-                </div>
-                <div className="flex flex-col gap-2 w-full sm:w-auto">
-                  {canEdit && (
-                    <>
-                      <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp" onChange={handleLogoUpload} className="hidden" id="logo-upload" />
-                      <label htmlFor="logo-upload" className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg cursor-pointer transition-colors active:scale-95 ${uploading ? 'bg-slate-100 dark:bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'}`}>
-                        <Upload size={16} /> {uploading ? 'Upload...' : 'Choisir un logo'}
-                      </label>
-                      {logoPreview && (
-                        <button type="button" onClick={handleRemoveLogo} className="inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors active:scale-95">
-                          <X size={16} /> Supprimer
-                        </button>
-                      )}
-                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">PNG, JPG, SVG ou WEBP • Max 5 Mo</p>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* LIEN PUBLIC */}
-            <div className="border-b border-slate-100 dark:border-slate-700 pb-6">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-2">Lien public de demande de devis</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Partagez ce lien avec vos clients.</p>
-              <div className="flex flex-col sm:flex-row gap-3">
-                <div className="flex-1 flex items-center">
-                  <span className="bg-slate-100 dark:bg-slate-700 border border-r-0 border-slate-300 dark:border-slate-600 rounded-l-lg px-3 py-3 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap hidden sm:block">/demande/</span>
-                  <input type="text" name="publicSlug" value={formData.publicSlug} onChange={(e) => setFormData({ ...formData, publicSlug: e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, '') })} disabled={!canEdit} className={`flex-1 px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-l-lg sm:rounded-l-none rounded-r-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} placeholder="mon-entreprise" />
-                </div>
-                {formData.publicSlug && (
-                  <button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/demande/${formData.publicSlug}`); setSuccess('Lien copié !'); setTimeout(() => setSuccess(''), 3000); }} className="px-4 py-3 text-sm font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 flex items-center justify-center gap-2 transition-colors active:scale-95">
-                    <Copy size={16} /> Copier le lien
+          {/* Navigation par onglets */}
+          <div className="bg-white dark:bg-slate-800 rounded-t-xl border border-slate-200 dark:border-slate-700 border-b-0 overflow-hidden">
+            <div className="flex overflow-x-auto scrollbar-hide">
+              {TABS.map(tab => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flex-1 min-w-[140px] flex items-center justify-center gap-2 px-4 py-4 text-sm font-semibold transition-all relative ${
+                      isActive
+                        ? 'text-purple-600 dark:text-purple-400 bg-purple-50/50 dark:bg-purple-900/10'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700/30'
+                    }`}
+                  >
+                    {tab.icon}
+                    <span className="hidden sm:inline">{tab.label}</span>
+                    {isActive && (
+                      <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600 dark:bg-purple-400"></span>
+                    )}
                   </button>
-                )}
-              </div>
+                );
+              })}
             </div>
-
-            {/* 🆕 SECTION MONNAIE */}
-            <div className="border-b border-slate-100 dark:border-slate-700 pb-6">
-              <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2 mb-2">
-                <Coins size={20} className="text-purple-600" />
-                Monnaie
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
-                Devise utilisée sur vos devis, factures, reçus et exports CSV.
+            <div className="px-4 sm:px-6 py-3 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-200 dark:border-slate-700">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {TABS.find(t => t.id === activeTab)?.description}
               </p>
-              <select
-                name="currency"
-                value={formData.currency}
-                onChange={handleChange}
-                disabled={!canEdit}
-                className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm font-semibold ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white'}`}
-              >
-                {SUPPORTED_CURRENCIES.map(c => (
-                  <option key={c.code} value={c.code}>
-                    {c.symbol} — {c.name}
-                  </option>
-                ))}
-              </select>
-              <div className="mt-3 bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3 flex flex-wrap items-center gap-3">
-                <p className="text-xs text-purple-700 dark:text-purple-300 flex-1 min-w-[200px]">
-                  💡 <strong>Aperçu :</strong> Un montant de <strong>1 234,56</strong> s'affichera :
-                </p>
-                <span className="font-mono font-bold text-lg text-purple-900 dark:text-purple-100">
-                  {formatMoney(1234.56, formData.currency)}
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {SUPPORTED_CURRENCIES.slice(0, 5).map(c => (
-                  <span key={c.code} className="text-xs px-2 py-1 rounded-full bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 font-mono">
-                    {c.symbol} = {formatMoney(100, c.code)}
-                  </span>
-                ))}
-              </div>
             </div>
+          </div>
 
-            {/* TVA MULTI-PAYS */}
-            <div className="border-b border-slate-100 dark:border-slate-700 pb-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4">
-                <div>
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Globe size={20} className="text-purple-600" />
-                    Taux de TVA par pays
-                  </h3>
-                  <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-                    Définissez vos taux de TVA pour chaque pays où vous facturez.
-                  </p>
-                </div>
-                {canEdit && (
-                  <button type="button" onClick={() => openAddTvaModal()} className="flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors active:scale-95">
-                    <Plus size={16} /> Ajouter un taux
-                  </button>
-                )}
-              </div>
-
-              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4 mb-4">
-                <label className="block text-sm font-semibold text-purple-900 dark:text-purple-200 mb-2">
-                  ⭐ Taux de TVA par défaut
-                </label>
-                <select name="defaultTvaRate" value={formData.defaultTvaRate} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-purple-300 dark:border-purple-700 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm font-semibold ${!canEdit ? 'bg-purple-50/50 dark:bg-purple-900/10 cursor-not-allowed' : 'bg-white dark:bg-slate-700 text-slate-900 dark:text-white'}`}>
-                  {customTvaRates.map(rate => {
-                    const country = COUNTRIES.find(c => c.code === rate.country);
-                    return <option key={rate.id} value={rate.rate.toString()}>{rate.name} — {rate.rate}% {country ? `(${country.name})` : ''}</option>;
-                  })}
-                </select>
-              </div>
-
-              <div className="space-y-4">
-                {Object.values(ratesByCountry).map(({ country, rates }) => (
-                  <div key={country.code} className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
-                    <div className="bg-slate-50 dark:bg-slate-900/50 px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
-                      <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{country.name}</span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">({rates.length} taux)</span>
+          <form onSubmit={handleSubmit} className="bg-white dark:bg-slate-800 rounded-b-xl shadow-sm border border-slate-200 dark:border-slate-700 border-t-0 p-4 sm:p-6">
+            {/* ONGLET 1 : INFORMATIONS ENTREPRISE */}
+            {activeTab === 'company' && (
+              <div className="space-y-6 animate-fadeIn">
+                {/* LOGO */}
+                <Card>
+                  <SectionTitle icon={ImageIcon} action={
+                    canEdit && logoPreview ? (
+                      <button type="button" onClick={handleRemoveLogo} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-900/30 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/50 transition-colors active:scale-95">
+                        <X size={14} /> Supprimer
+                      </button>
+                    ) : null
+                  }>
+                    Logo de l'entreprise <span className="text-sm font-normal text-slate-500 dark:text-slate-400">(optionnel)</span>
+                  </SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Ajoutez votre logo pour qu'il apparaisse sur vos devis et factures.</p>
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                    <div className="w-32 h-32 border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg flex items-center justify-center bg-slate-50 dark:bg-slate-700/50 overflow-hidden flex-shrink-0">
+                      {logoPreview ? <img src={logoPreview} alt="Logo" className="w-full h-full object-contain p-2" /> : <ImageIcon size={40} className="text-slate-300 dark:text-slate-500" />}
                     </div>
-                    <div className="divide-y divide-slate-100 dark:divide-slate-700">
-                      {rates.map(rate => (
-                        <div key={rate.id} className="px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-slate-900 dark:text-white">{rate.name}</span>
-                              <span className={`text-sm font-bold ${formData.defaultTvaRate === rate.rate.toString() ? 'text-purple-600 dark:text-purple-400' : 'text-slate-600 dark:text-slate-300'}`}>{rate.rate}%</span>
-                              {formData.defaultTvaRate === rate.rate.toString() && <span className="text-[10px] font-semibold bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 px-2 py-0.5 rounded-full">PAR DÉFAUT</span>}
-                            </div>
-                          </div>
-                          {canEdit && (
-                            <div className="flex gap-1 ml-2">
-                              <button type="button" onClick={() => openAddTvaModal(rate)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier">
-                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-                              </button>
-                              {customTvaRates.length > 1 && (
-                                <button type="button" onClick={() => handleDeleteTva(rate.id)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="Supprimer">
-                                  <Trash2 size={16} />
-                                </button>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                    <div className="flex flex-col gap-2 w-full sm:w-auto">
+                      {canEdit && (
+                        <>
+                          <input ref={fileInputRef} type="file" accept="image/png,image/jpeg,image/jpg,image/svg+xml,image/webp" onChange={handleLogoUpload} className="hidden" id="logo-upload" />
+                          <label htmlFor="logo-upload" className={`inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-medium rounded-lg cursor-pointer transition-colors active:scale-95 ${uploading ? 'bg-slate-100 dark:bg-slate-700 text-slate-400 cursor-not-allowed' : 'bg-purple-600 text-white hover:bg-purple-700'}`}>
+                            <Upload size={16} /> {uploading ? 'Upload...' : 'Choisir un logo'}
+                          </label>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">PNG, JPG, SVG ou WEBP • Max 5 Mo</p>
+                        </>
+                      )}
                     </div>
                   </div>
-                ))}
-              </div>
-            </div>
+                </Card>
 
-            {/* INFOS GÉNÉRALES */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
-              <div className="md:col-span-2"><h3 className="text-lg font-semibold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-2 mb-4">Informations générales</h3></div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Nom de l'entreprise *</label>
-                <input type="text" name="name" required value={formData.name} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Forme juridique</label>
-                <select name="legalForm" value={formData.legalForm} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`}>
-                  <option>Entreprise Individuelle</option><option>Micro-entreprise</option><option>SASU</option><option>SARL</option><option>SAS</option><option>EURL</option>
-                </select>
-              </div>
-              
-              <div className="md:col-span-2 space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Adresse complète</label>
-                <input type="text" name="address" value={formData.address} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">N° SIRET</label>
-                <input type="text" name="siret" value={formData.siret} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">RCS / RM</label>
-                <input type="text" name="rcs" value={formData.rcs} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">N° TVA intracommunautaire</label>
-                <select name="tvaNumber" value={formData.tvaNumber.startsWith('TVA non') ? formData.tvaNumber : 'Assujetti à la TVA'} onChange={(e) => {
-                  if (e.target.value === 'Assujetti à la TVA') {
-                    setFormData({ ...formData, tvaNumber: 'Assujetti à la TVA' });
-                  } else {
-                    setFormData({ ...formData, tvaNumber: e.target.value });
-                  }
-                }} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`}>
-                  <option value="TVA non applicable, art. 293 B du CGI">TVA non applicable (micro-entreprise)</option>
-                  <option value="Assujetti à la TVA">Assujetti à la TVA (saisir le numéro ci-dessous)</option>
-                </select>
-                {formData.tvaNumber !== 'TVA non applicable, art. 293 B du CGI' && (
-                  <input type="text" placeholder="Ex: FR12345678901" value={formData.tvaNumber === 'Assujetti à la TVA' ? '' : formData.tvaNumber} onChange={(e) => setFormData({ ...formData, tvaNumber: e.target.value || 'Assujetti à la TVA' })} disabled={!canEdit} className={`w-full mt-2 px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-                )}
-              </div>
-              
-              <div className="md:col-span-2"><h3 className="text-lg font-semibold text-slate-900 dark:text-white border-b border-slate-100 dark:border-slate-700 pb-2 mb-4 mt-4">Coordonnées</h3></div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Téléphone</label>
-                <input type="tel" name="phone" value={formData.phone} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-              
-              <div className="space-y-1.5">
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">Email</label>
-                <input type="email" name="email" value={formData.email} onChange={handleChange} disabled={!canEdit} className={`w-full px-3 py-3 border border-slate-300 dark:border-slate-600 rounded-lg focus:ring-2 focus:ring-purple-500 outline-none text-sm text-slate-900 dark:text-white ${!canEdit ? 'bg-slate-50 dark:bg-slate-800 cursor-not-allowed' : 'bg-white dark:bg-slate-700'}`} />
-              </div>
-            </div>
+                {/* LIEN PUBLIC */}
+                <Card>
+                  <SectionTitle icon={Globe}>Lien public de demande de devis</SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">Partagez ce lien avec vos clients pour qu'ils puissent vous demander un devis.</p>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <div className="flex-1 flex items-center">
+                      <span className="bg-slate-100 dark:bg-slate-700 border border-r-0 border-slate-300 dark:border-slate-600 rounded-l-lg px-3 py-3 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap hidden sm:block">/demande/</span>
+                      <Input
+                        type="text"
+                        name="publicSlug"
+                        value={formData.publicSlug}
+                        onChange={(e) => setFormData({ ...formData, publicSlug: (e.target as HTMLInputElement).value.toLowerCase().replace(/[^a-z0-9-]/g, '') })}
+                        disabled={!canEdit}
+                        className="flex-1 rounded-l-lg sm:rounded-l-none rounded-r-lg"
+                        placeholder="mon-entreprise"
+                      />
+                    </div>
+                    {formData.publicSlug && (
+                      <button type="button" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/demande/${formData.publicSlug}`); toast.success('Lien copié !'); }} className="px-4 py-3 text-sm font-medium text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-900/30 border border-purple-200 dark:border-purple-800 rounded-lg hover:bg-purple-100 dark:hover:bg-purple-900/50 flex items-center justify-center gap-2 transition-colors active:scale-95">
+                        <Copy size={16} /> Copier le lien
+                      </button>
+                    )}
+                  </div>
+                </Card>
 
+                {/* INFOS GÉNÉRALES */}
+                <Card>
+                  <SectionTitle icon={Building2}>Informations légales</SectionTitle>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    <FormField label="Nom de l'entreprise" required>
+                      <Input type="text" name="name" required value={formData.name} onChange={handleChange} disabled={!canEdit} />
+                    </FormField>
+                    <FormField label="Forme juridique">
+                      <Select name="legalForm" value={formData.legalForm} onChange={handleChange} disabled={!canEdit}>
+                        <option>Entreprise Individuelle</option><option>Micro-entreprise</option><option>SASU</option><option>SARL</option><option>SAS</option><option>EURL</option>
+                      </Select>
+                    </FormField>
+                    <FormField label="Adresse complète" className="md:col-span-2">
+                      <Input type="text" name="address" value={formData.address} onChange={handleChange} disabled={!canEdit} />
+                    </FormField>
+                    <FormField label="N° SIREN / SIRET" hint={siretError || "💡 Le formatage et la vérification officielle se font automatiquement."}>
+                      <div className="relative">
+                        <Input
+                          type="text"
+                          name="siret"
+                          value={formData.siret}
+                          onChange={handleSiretChange}
+                          onBlur={handleSiretBlur}
+                          disabled={!canEdit}
+                          maxLength={17}
+                          placeholder="123 456 789 00012"
+                          className={siretError ? 'border-red-500 focus:ring-red-500 pr-10' : 'pr-10'}
+                        />
+                        {isCheckingSiret && (
+                          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+                            <svg className="animate-spin h-5 w-5 text-purple-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                          </div>
+                        )}
+                      </div>
+                    </FormField>
+                    <FormField label="RCS / RM">
+                      <Input type="text" name="rcs" value={formData.rcs} onChange={handleChange} disabled={!canEdit} />
+                    </FormField>
+                    <FormField label="N° TVA intracommunautaire" className="md:col-span-2">
+                      <Select name="tvaNumber" value={formData.tvaNumber.startsWith('TVA non') ? formData.tvaNumber : 'Assujetti à la TVA'} onChange={(e) => {
+                        if ((e.target as HTMLSelectElement).value === 'Assujetti à la TVA') {
+                          setFormData({ ...formData, tvaNumber: 'Assujetti à la TVA' });
+                        } else {
+                          setFormData({ ...formData, tvaNumber: (e.target as HTMLSelectElement).value });
+                        }
+                      }} disabled={!canEdit}>
+                        <option value="TVA non applicable, art. 293 B du CGI">TVA non applicable (micro-entreprise)</option>
+                        <option value="Assujetti à la TVA">Assujetti à la TVA (saisir le numéro ci-dessous)</option>
+                      </Select>
+                      {formData.tvaNumber !== 'TVA non applicable, art. 293 B du CGI' && (
+                        <Input type="text" placeholder="Ex: FR12345678901" value={formData.tvaNumber === 'Assujetti à la TVA' ? '' : formData.tvaNumber} onChange={(e) => setFormData({ ...formData, tvaNumber: (e.target as HTMLInputElement).value || 'Assujetti à la TVA' })} disabled={!canEdit} className="mt-2" />
+                      )}
+                    </FormField>
+                  </div>
+                </Card>
+
+                {/* COORDONNÉES */}
+                <Card>
+                  <SectionTitle icon={Globe}>Coordonnées</SectionTitle>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    <FormField label="Téléphone">
+                      <Input type="tel" name="phone" value={formData.phone} onChange={handleChange} disabled={!canEdit} />
+                    </FormField>
+                    <FormField label="Email">
+                      <Input type="email" name="email" value={formData.email} onChange={handleChange} disabled={!canEdit} />
+                    </FormField>
+                  </div>
+                </Card>
+
+                {/* OBJECTIFS COMMERCIAUX */}
+                <Card>
+                  <SectionTitle icon={Target}>Objectifs commerciaux</SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                    Définissez vos objectifs mensuels pour suivre votre progression sur le tableau de bord.
+                  </p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
+                    <FormField 
+                      label="🎯 Objectif mensuel (HT)" 
+                      hint="Utilisé pour calculer votre progression sur le tableau de bord"
+                    >
+                      <div className="relative">
+                        <Input 
+                          type="number" 
+                          name="monthlyGoal" 
+                          value={formData.monthlyGoal} 
+                          onChange={handleChange} 
+                          disabled={!canEdit}
+                          min="0"
+                          step="100"
+                          placeholder="5000"
+                        />
+                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400 dark:text-slate-500 pointer-events-none">
+                          {currentCurrency.symbol}
+                        </span>
+                      </div>
+                    </FormField>
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* ONGLET 2 : TVA */}
+            {activeTab === 'vat' && (
+              <div className="space-y-6 animate-fadeIn">
+                <Card>
+                  <SectionTitle icon={FileText}>Taux de TVA par défaut</SectionTitle>
+                  <Alert tone="info" icon={AlertCircle} className="mb-4">
+                    Ce taux sera appliqué par défaut sur vos nouveaux devis et factures.
+                  </Alert>
+                  <FormField label="⭐ Taux par défaut">
+                    <Select name="defaultTvaRate" value={formData.defaultTvaRate} onChange={handleChange} disabled={!canEdit} className={!defaultRateValid ? 'border-red-500' : ''}>
+                      {customTvaRates.map(rate => {
+                        const country = COUNTRIES.find(c => c.code === rate.country);
+                        return <option key={rate.id} value={rate.rate.toString()}>{rate.name} — {rate.rate}% {country ? `(${country.name})` : ''}</option>;
+                      })}
+                    </Select>
+                  </FormField>
+                  {!defaultRateValid && (
+                    <p className="text-xs text-red-600 dark:text-red-400 mt-2 flex items-center gap-1">
+                      <AlertCircle size={12} /> Le taux sélectionné n'existe pas dans votre liste
+                    </p>
+                  )}
+                </Card>
+
+                <Card>
+                  <SectionTitle icon={Globe} action={
+                    canEdit ? (
+                      <button type="button" onClick={() => openAddTvaModal()} className="flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors active:scale-95">
+                        <Plus size={16} /> Ajouter un taux
+                      </button>
+                    ) : null
+                  }>
+                    Taux de TVA par pays
+                  </SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                    Gérez vos taux de TVA pour chaque pays où vous facturez.
+                  </p>
+                  <div className="space-y-4">
+                    {Object.values(ratesByCountry).map(({ country, rates }) => (
+                      <div key={country.code} className="border border-slate-200 dark:border-slate-700 rounded-lg overflow-hidden">
+                        <div className="bg-slate-50 dark:bg-slate-900/50 px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                          <span className="text-sm font-bold text-slate-700 dark:text-slate-300">{country.name}</span>
+                          <Badge tone="slate">{rates.length} taux</Badge>
+                        </div>
+                        <div className="divide-y divide-slate-100 dark:divide-slate-700">
+                          {rates.map(rate => (
+                            <div key={rate.id} className="px-4 py-3 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span className="font-semibold text-slate-900 dark:text-white">{rate.name}</span>
+                                  <span className={`text-sm font-bold ${formData.defaultTvaRate === rate.rate.toString() ? 'text-purple-600 dark:text-purple-400' : 'text-slate-600 dark:text-slate-300'}`}>{rate.rate}%</span>
+                                  {formData.defaultTvaRate === rate.rate.toString() && <Badge tone="purple">PAR DÉFAUT</Badge>}
+                                </div>
+                              </div>
+                              {canEdit && (
+                                <div className="flex gap-1 ml-2">
+                                  <button type="button" onClick={() => openAddTvaModal(rate)} className="p-2 text-slate-400 hover:text-purple-600 hover:bg-purple-50 dark:hover:bg-purple-900/30 rounded-lg transition-colors" title="Modifier">
+                                    <Edit2 size={16} />
+                                  </button>
+                                  {customTvaRates.length > 1 && (
+                                    <button type="button" onClick={() => setConfirmDeleteTva(rate)} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors" title="Supprimer">
+                                      <Trash2 size={16} />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </Card>
+              </div>
+            )}
+
+            {/* ONGLET 3 : DEVISE */}
+            {activeTab === 'currency' && (
+              <div className="space-y-6 animate-fadeIn">
+                <Card>
+                  <SectionTitle icon={Coins}>Devise principale</SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                    Cette devise sera utilisée sur tous vos devis, factures, reçus et exports CSV.
+                  </p>
+                  <FormField label="Sélectionnez votre devise">
+                    <Select name="currency" value={formData.currency} onChange={handleChange} disabled={!canEdit}>
+                      {SUPPORTED_CURRENCIES.map(c => (
+                        <option key={c.code} value={c.code}>
+                          {c.symbol} — {c.name}
+                        </option>
+                      ))}
+                    </Select>
+                  </FormField>
+                </Card>
+
+                {/* APERÇU */}
+                <Card>
+                  <SectionTitle icon={Eye}>Aperçu du rendu</SectionTitle>
+                  <Alert tone="info" icon={Eye} className="mb-4">
+                    Un montant de <strong>1 234,56</strong> s'affichera ainsi sur vos documents :
+                  </Alert>
+                  <div className="bg-white dark:bg-slate-800 rounded-lg p-4 border border-purple-200 dark:border-purple-700 mb-4">
+                    <span className="font-mono font-bold text-2xl text-purple-900 dark:text-purple-100">
+                      {formatMoney(1234.56, formData.currency)}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 text-xs text-slate-600 dark:text-slate-400">
+                    <div><strong>Code :</strong> {currentCurrency.code}</div>
+                    <div><strong>Symbole :</strong> {currentCurrency.symbol}</div>
+                    <div><strong>Locale :</strong> {currentCurrency.locale}</div>
+                    <div><strong>Décimales :</strong> {['JPY', 'XOF', 'XAF'].includes(currentCurrency.code) ? '0' : '2'}</div>
+                  </div>
+                </Card>
+
+                {/* AUTRES DEVISES */}
+                <Card>
+                  <SectionTitle>Autres devises disponibles</SectionTitle>
+                  <div className="flex flex-wrap gap-2">
+                    {SUPPORTED_CURRENCIES.map(c => (
+                      <span
+                        key={c.code}
+                        className={`text-xs px-3 py-1.5 rounded-full font-mono transition-colors ${
+                          c.code === formData.currency
+                            ? 'bg-purple-600 text-white font-bold'
+                            : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                        }`}
+                      >
+                        {c.symbol} {c.code}
+                      </span>
+                    ))}
+                  </div>
+                </Card>
+
+                <Alert tone="info" icon={AlertCircle} title="Changement de devise">
+                  Si vous changez de devise, les anciens documents ne seront pas modifiés. Seuls les nouveaux documents utiliseront la devise sélectionnée. La devise est stockée dans chaque document pour traçabilité.
+                </Alert>
+              </div>
+            )}
+
+            {/* BOUTONS D'ACTION */}
             {canEdit && (
-              <div className="flex flex-col sm:flex-row items-center justify-end gap-3 pt-6 border-t border-slate-100 dark:border-slate-700">
-                <button type="button" onClick={() => navigate('/dashboard')} className="w-full sm:w-auto px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors active:scale-95">
-                  Annuler
-                </button>
-                <button type="submit" disabled={saving} className="w-full sm:w-auto flex items-center justify-center gap-2 px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors active:scale-95">
-                  {saving ? (<><svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg><span>Enregistrement...</span></>) : (<><Save size={16} /><span>Enregistrer</span></>)}
-                </button>
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-6 mt-6 border-t border-slate-100 dark:border-slate-700">
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                  <span className="w-2 h-2 rounded-full bg-purple-500"></span>
+                  Onglet actuel : <strong className="text-slate-700 dark:text-slate-300">{TABS.find(t => t.id === activeTab)?.label}</strong>
+                </div>
+                <div className="flex flex-col sm:flex-row items-center gap-3 w-full sm:w-auto">
+                  <button type="button" onClick={() => navigate('/dashboard')} className="w-full sm:w-auto px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 transition-colors active:scale-95">
+                    Annuler
+                  </button>
+                  <button type="submit" disabled={saving || !defaultRateValid} className="w-full sm:w-auto flex items-center justify-center gap-2 px-6 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 transition-colors active:scale-95 shadow-lg shadow-purple-600/20">
+                    {saving ? (
+                      <>
+                        <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path></svg>
+                        <span>Enregistrement...</span>
+                      </>
+                    ) : (
+                      <><Save size={16} /><span>Enregistrer</span></>
+                    )}
+                  </button>
+                </div>
               </div>
             )}
           </form>
         </main>
 
         {/* MODAL TVA */}
-        {showAddTvaModal && (
-          <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm p-0 sm:p-4 animate-fadeIn">
-            <div className="bg-white dark:bg-slate-800 rounded-t-2xl sm:rounded-2xl shadow-2xl w-full sm:max-w-md animate-slideUp">
-              <div className="p-4 sm:p-6 border-b border-slate-200 dark:border-slate-700 flex justify-between items-center">
-                <h3 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                  <Globe className="text-purple-600" size={20} />
-                  {editingTvaId ? 'Modifier le taux' : 'Nouveau taux de TVA'}
-                </h3>
-                <button onClick={() => { setShowAddTvaModal(false); setEditingTvaId(null); }} className="p-2 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors">
-                  <X size={20} className="text-slate-500 dark:text-slate-400" />
-                </button>
-              </div>
-              <div className="p-4 sm:p-6 space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Nom du taux *</label>
-                  <input type="text" value={newTva.name} onChange={e => setNewTva({ ...newTva, name: e.target.value })} placeholder="Ex: Taux normal, Taux réduit..." className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" autoFocus />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Taux (%) *</label>
-                    <input type="number" step="0.1" min="0" max="100" value={newTva.rate} onChange={e => setNewTva({ ...newTva, rate: e.target.value })} placeholder="20" className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none" />
-                  </div>
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">Pays *</label>
-                    <select value={newTva.country} onChange={e => setNewTva({ ...newTva, country: e.target.value })} className="w-full px-3 py-3 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none bg-white dark:bg-slate-700">
-                      {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
-                  <p className="text-xs text-purple-700 dark:text-purple-300">
-                    💡 <strong>Astuce :</strong> Créez plusieurs taux pour un même pays (ex: France 20%, 10%, 5.5%, 2.1%).
-                  </p>
-                </div>
-              </div>
-              <div className="p-4 sm:p-6 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 bg-slate-50 dark:bg-slate-800/90 rounded-b-2xl">
-                <button onClick={() => { setShowAddTvaModal(false); setEditingTvaId(null); }} className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
-                <button onClick={handleSaveTva} disabled={!newTva.name.trim() || !newTva.rate} className="flex-1 px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 active:scale-95 transition-all">{editingTvaId ? 'Modifier' : 'Ajouter'}</button>
-              </div>
+        <Modal
+          open={showAddTvaModal}
+          onClose={() => { setShowAddTvaModal(false); setEditingTvaId(null); }}
+          title={editingTvaId ? 'Modifier le taux' : 'Nouveau taux de TVA'}
+          icon={<Globe className="text-purple-600" size={20} />}
+          footer={
+            <>
+              <button onClick={() => { setShowAddTvaModal(false); setEditingTvaId(null); }} className="flex-1 px-4 py-3 text-sm font-medium text-slate-700 dark:text-slate-300 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 active:scale-95 transition-all">Annuler</button>
+              <button onClick={handleSaveTva} disabled={!newTva.name.trim() || !newTva.rate} className="flex-1 px-4 py-3 text-sm font-semibold text-white bg-purple-600 rounded-lg hover:bg-purple-700 disabled:opacity-50 active:scale-95 transition-all">{editingTvaId ? 'Modifier' : 'Ajouter'}</button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <FormField label="Nom du taux" required>
+              <Input type="text" value={newTva.name} onChange={e => setNewTva({ ...newTva, name: (e.target as HTMLInputElement).value })} placeholder="Ex: Taux normal, Taux réduit..." autoFocus />
+            </FormField>
+            <div className="grid grid-cols-2 gap-3">
+              <FormField label="Taux (%)" required>
+                <Input type="number" step="0.1" min="0" max="100" value={newTva.rate} onChange={e => setNewTva({ ...newTva, rate: (e.target as HTMLInputElement).value })} placeholder="20" />
+              </FormField>
+              <FormField label="Pays" required>
+                <Select value={newTva.country} onChange={e => setNewTva({ ...newTva, country: (e.target as HTMLSelectElement).value })}>
+                  {COUNTRIES.map(c => <option key={c.code} value={c.code}>{c.name}</option>)}
+                </Select>
+              </FormField>
             </div>
+            <Alert tone="info" icon={AlertCircle}>
+              💡 <strong>Astuce :</strong> Créez plusieurs taux pour un même pays (ex: France 20%, 10%, 5.5%, 2.1%).
+            </Alert>
           </div>
-        )}
+        </Modal>
+
+        {/* CONFIRMATION SUPPRESSION TVA */}
+        <ConfirmDialog
+          open={!!confirmDeleteTva}
+          onClose={() => setConfirmDeleteTva(null)}
+          onConfirm={handleDeleteTvaConfirm}
+          title="Supprimer ce taux de TVA ?"
+          description={
+            confirmDeleteTva ? (
+              <>
+                Le taux <strong className="text-slate-700 dark:text-slate-200">{confirmDeleteTva.name} ({confirmDeleteTva.rate}%)</strong> sera supprimé de votre liste.
+              </>
+            ) : null
+          }
+          confirmLabel="Supprimer"
+          cancelLabel="Annuler"
+          tone="danger"
+        />
       </div>
     </Sidebar>
   );

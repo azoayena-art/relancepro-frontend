@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { account, databases, teams, DATABASE_ID } from '../appwrite';
+import { account, databases, DATABASE_ID } from '../appwrite';
+import { useAuth } from '../context/AuthContext';
 import { ID, Query, Permission, Role } from 'appwrite';
 import { Users, Lock, Mail, User, AlertCircle, CheckCircle, LogIn, ArrowRight } from 'lucide-react';
 
 export default function JoinTeam() {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const emailFromUrl = searchParams.get('email') || '';
@@ -19,6 +21,50 @@ export default function JoinTeam() {
   const [teamInfo, setTeamInfo] = useState<{ teamName: string; roleName: string } | null>(null);
   const [memberDocId, setMemberDocId] = useState('');
   const [teamIdToJoin, setTeamIdToJoin] = useState('');
+
+  // ✅ Si l'utilisateur est déjà connecté ET que l'email correspond, rejoindre automatiquement
+  useEffect(() => {
+    if (user && emailFromUrl && user.email?.toLowerCase() === emailFromUrl.toLowerCase()) {
+      joinTeamWithCurrentUser();
+    }
+  }, [user, emailFromUrl]);
+
+  const joinTeamWithCurrentUser = async () => {
+    if (!user) return;
+    
+    setLoading(true);
+    setError('');
+    
+    try {
+      // Chercher les invitations en attente pour cet email
+      const invitationsRes = await databases.listDocuments(DATABASE_ID, 'team_members', [
+        Query.equal('email', user.email?.toLowerCase() || ''),
+        Query.equal('status', 'active'),
+        Query.equal('userId', 'pending')
+      ]);
+
+      if (invitationsRes.documents.length === 0) {
+        setError('Aucune invitation en attente pour cet email. Vous êtes peut-être déjà membre de cette équipe.');
+        setLoading(false);
+        return;
+      }
+
+      // Mettre à jour toutes les invitations pour les lier à cet utilisateur
+      for (const invitation of invitationsRes.documents) {
+        await databases.updateDocument(DATABASE_ID, 'team_members', invitation.$id, {
+          userId: user.$id,
+          joinedAt: new Date().toISOString()
+        });
+      }
+
+      console.log("✅ Équipe rejointe avec succès !");
+      navigate('/dashboard', { replace: true });
+    } catch (error: any) {
+      console.error('Erreur rejoindre équipe:', error);
+      setError(`Erreur: ${error.message}`);
+      setLoading(false);
+    }
+  };
 
   const handleVerifyEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -80,11 +126,42 @@ export default function JoinTeam() {
     setLoading(true);
 
     try {
+      // 1. Créer le compte d'authentification
       const userResponse = await account.create(ID.unique(), email, password, name);
       const newUserId = userResponse.$id;
 
+      // 2. CONNECTER l'utilisateur IMMÉDIATEMENT
       await account.createEmailPasswordSession(email, password);
 
+      // Séparer le nom complet en prénom et nom
+      const nameParts = name.trim().split(' ');
+      const firstName = nameParts[0];
+      const lastName = nameParts.length > 1 ? nameParts.slice(1).join(' ') : '';
+
+      // 3. Créer la fiche profil dans la collection 'users'
+      await databases.createDocument(
+        DATABASE_ID,
+        'users',
+        newUserId,
+        {
+          userId: newUserId,
+          firstName: firstName,
+          lastName: lastName,
+          companyName: '',
+          trade: '',
+          phone: '',
+          country: '',
+          role: 'member',
+          createdAt: new Date().toISOString()
+        },
+        [
+          Permission.read(Role.user(newUserId)),
+          Permission.update(Role.user(newUserId)),
+          Permission.delete(Role.user(newUserId))
+        ]
+      );
+
+      // 4. Mettre à jour l'invitation existante dans team_members
       await databases.updateDocument(
         DATABASE_ID, 
         'team_members', 
@@ -101,8 +178,8 @@ export default function JoinTeam() {
         ]
       );
 
-      console.log("🚀 Redirection vers le dashboard...");
-      window.location.href = '/dashboard';
+      console.log("🚀 Compte créé, session ouverte et profil synchronisé. Redirection...");
+      navigate('/dashboard', { replace: true });
       
     } catch (err: any) {
       if (err.code === 409) {
@@ -111,7 +188,7 @@ export default function JoinTeam() {
       } else {
         setError(err.message || 'Erreur lors de l\'inscription.');
       }
-      console.error("Erreur inscription:", err);
+      console.error("Erreur inscription détaillée:", err);
     } finally {
       setLoading(false);
     }
@@ -120,6 +197,59 @@ export default function JoinTeam() {
   const handleGoToLogin = () => {
     navigate(`/login?email=${encodeURIComponent(email)}`);
   };
+
+  // Si l'utilisateur est déjà connecté avec un email différent, afficher un message
+  if (user && emailFromUrl && user.email?.toLowerCase() !== emailFromUrl.toLowerCase()) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center p-4">
+        <div className="bg-white dark:bg-slate-800 rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 w-full max-w-md p-6 sm:p-8">
+          <div className="text-center">
+            <div className="w-16 h-16 bg-gradient-to-br from-amber-500 to-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 shadow-lg">
+              <AlertCircle size={32} className="text-white" />
+            </div>
+            <h1 className="text-2xl font-bold text-slate-900 dark:text-white mb-2">
+              Compte différent
+            </h1>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+              Vous êtes connecté avec <strong>{user.email}</strong> mais l'invitation est pour <strong>{emailFromUrl}</strong>.
+            </p>
+            <div className="space-y-3">
+              <button
+                onClick={() => navigate('/dashboard')}
+                className="w-full bg-purple-600 text-white py-3 rounded-lg font-semibold hover:bg-purple-700 transition-all"
+              >
+                Continuer avec mon compte actuel
+              </button>
+              <button
+                onClick={() => {
+                  account.deleteSession('current');
+                  window.location.reload();
+                }}
+                className="w-full bg-slate-200 dark:bg-slate-700 text-slate-900 dark:text-white py-3 rounded-lg font-semibold hover:bg-slate-300 dark:hover:bg-slate-600 transition-all"
+              >
+                Se déconnecter et utiliser {emailFromUrl}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Si l'utilisateur est déjà connecté avec le bon email, afficher le chargement
+  if (user && emailFromUrl && user.email?.toLowerCase() === emailFromUrl.toLowerCase() && loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center p-4">
+        <div className="text-center">
+          <svg className="animate-spin h-12 w-12 text-purple-600 mx-auto mb-4" viewBox="0 0 24 24">
+            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <p className="text-slate-600 dark:text-slate-400">Rejoindre l'équipe...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-slate-900 dark:via-slate-800 dark:to-slate-900 flex items-center justify-center p-4">
