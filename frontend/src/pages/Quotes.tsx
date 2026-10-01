@@ -47,6 +47,14 @@ import { jsPDF } from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import QuoteModal from '../components/QuoteModal';
 
+// ✅ Import des fonctions de génération e-facture
+import { 
+  convertInvoiceToEInvoiceData, 
+  generateFacturXXml, 
+  computeHash, 
+  validateEInvoiceData 
+} from '../services/eInvoiceService';
+
 interface QuoteItem {
   id: string; reference: string; description: string; quantity: number;
   unit: string; unitPrice: number; tvaRate: number; total: number; discount: number;
@@ -435,6 +443,133 @@ export default function Quotes() {
     }
   };
 
+  // ✅ Conversion directe en E-Facture depuis le devis
+  const handleConvertToEInvoice = async (quote: Quote) => {
+    if (!currentTeamId || !user || !user.$id) return;
+    setGenerating(true);
+    try {
+      // 1. Récupérer les paramètres e-facturation
+      let einvoiceSettings: any = { platform: 'ppf', transmissionFormat: 'factur-x' };
+      try {
+        const res = await databases.listDocuments(DATABASE_ID, 'einvoice_settings', [
+          Query.equal('teamId', currentTeamId),
+          Query.limit(1)
+        ]);
+        if (res.documents.length > 0) {
+          einvoiceSettings = res.documents[0];
+        }
+      } catch (e) {
+        console.warn('Paramètres e-facture non chargés, valeurs par défaut utilisées');
+      }
+
+      const invoiceNumber = await getNextInvoiceNumber('FAC');
+      const today = new Date().toISOString().split('T')[0];
+      const dueDate = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+      const vatRate = parseFloat(companySettings?.defaultTvaRate || '20');
+      
+      const payload = {
+        invoiceNumber, quoteId: quote.$id, userId: user.$id, teamId: currentTeamId,
+        type: 'standard', originalQuoteId: quote.$id,
+        currencyCode: currency,
+        clientToken: Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15),
+        status: 'draft', issueDate: today, dueDate: dueDate,
+        subtotal: Math.round((quote.subtotal || 0) * 100) / 100,
+        vatRate: Math.round(vatRate), vatAmount: Math.round((quote.tax || 0) * 100) / 100,
+        total: Math.round((quote.total || 0) * 100) / 100, discount: quote.discount || 0,
+        tax: Math.round((quote.tax || 0) * 100) / 100, deposit: 0,
+        balance: Math.round((quote.total || 0) * 100) / 100,
+        companyName: quote.companyName || '', companyLegalForm: quote.companyLegalForm || '',
+        companyAddress: quote.companyAddress || '', companySiret: quote.companySiret || '',
+        companyRcs: quote.companyRcs || '', companyTva: quote.companyTva || '',
+        companyPhone: quote.companyPhone || '', companyEmail: quote.companyEmail || '',
+        logoFileId: quote.logoFileId || '', clientName: quote.clientName || '',
+        clientAddress: quote.clientAddress || '', clientBillingAddress: quote.clientBillingAddress || '',
+        clientEmail: quote.clientEmail || '', clientPhone: quote.clientPhone || '',
+        items: quote.items || '[]', paymentMethods: quote.paymentMethods || '',
+        paymentConditions: quote.paymentConditions || '', executionDelay: quote.executionDelay || '',
+        specialConditions: '', tradeType: quote.tradeType || '',
+        insuranceName: quote.insuranceName || '', insuranceAddress: quote.insuranceAddress || '',
+        insurancePolicy: quote.insurancePolicy || '',
+        notes: `E-Facture générée depuis le devis ${quote.quoteNumber}`
+      };
+
+      let perms: string[] = [];
+      if (user?.secureTeamId) {
+        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
+      } else {
+        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
+      }
+
+      // 2. Créer la facture commerciale de base
+      const createdInvoice = await databases.createDocument(DATABASE_ID, 'invoices', AppwriteID.unique(), payload, perms);
+
+      // 3. Générer les données e-facture et le XML
+      const eInvoiceData = convertInvoiceToEInvoiceData(createdInvoice);
+      const validation = validateEInvoiceData(eInvoiceData);
+      
+      if (!validation.valid) {
+        // Si la validation échoue, on annule la création et on affiche l'erreur
+        try {
+          await databases.deleteDocument(DATABASE_ID, 'invoices', createdInvoice.$id);
+        } catch (deleteErr) {
+          console.warn('Impossible de supprimer la facture invalide:', deleteErr);
+        }
+        toast.error('Données incomplètes pour l\'e-facture', { 
+          description: validation.errors.slice(0, 3).join(', ') + (validation.errors.length > 3 ? ` (+${validation.errors.length - 3} autres)` : ''),
+          duration: 8000
+        });
+        setGenerating(false);
+        return;
+      }
+
+      // 4. Afficher les warnings éventuels
+      if (validation.warnings.length > 0) {
+        console.warn('Warnings e-facture:', validation.warnings);
+      }
+
+      const xmlContent = generateFacturXXml(eInvoiceData);
+      const pdfHash = await computeHash(xmlContent);
+
+      // 5. Mettre à jour la facture avec les champs e-facture
+      await databases.updateDocument(DATABASE_ID, 'invoices', createdInvoice.$id, {
+        isElectronic: true,
+        transmissionStatus: 'ready', // Prête à être transmise
+        xmlContent: xmlContent,
+        pdfHash: pdfHash,
+        einvoicePlatform: einvoiceSettings.platform || 'ppf',
+        einvoiceFormat: einvoiceSettings.transmissionFormat || 'factur-x',
+      });
+
+      // 6. Mettre à jour le statut du devis
+      await databases.updateDocument(DATABASE_ID, 'quotes', quote.$id, { status: 'Facturé' });
+
+      if (user.$id && currentTeamId) {
+        await logAuditAction(user.$id, currentTeamId, 'create', 'invoice', createdInvoice.$id, { 
+          fromQuote: quote.$id, 
+          isElectronic: true,
+          platform: einvoiceSettings.platform || 'ppf'
+        });
+      }
+
+      await loadData();
+      
+      const platformLabel = einvoiceSettings.platform === 'ppf' ? 'PPF (Chorus Pro)' 
+                          : einvoiceSettings.platform === 'pdp' ? 'PDP' 
+                          : 'OD';
+      
+      toast.success(`⚡ E-Facture ${invoiceNumber} créée !`, { 
+        description: `Plateforme : ${platformLabel} • Prête à être transmise • Montant : ${fm(quote.total || 0)}`,
+        duration: 6000
+      });
+      navigate('/invoices');
+    } catch (e: any) {
+      console.error('Erreur génération e-facture:', e);
+      toast.error(`Erreur : ${e.message}`);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
   const hasInvoiceForQuote = (quoteId: string): boolean => {
     return invoices.some((inv: any) => inv.originalQuoteId === quoteId || inv.quoteId === quoteId);
   };
@@ -738,7 +873,10 @@ export default function Quotes() {
                                       <ActionMenuItem onClick={() => handleCopyLink(q)} icon={copiedToken === q.clientToken ? CheckCircle2 : Copy} label={copiedToken === q.clientToken ? 'Copié !' : 'Copier le lien'} />
                                     )}
                                     {hasPermission('invoices.create') && q.status === 'Accepté' && !hasInvoiceForQuote(q.$id) && (
-                                      <ActionMenuItem onClick={() => handleOpenChoiceModal(q)} icon={Send} label="Générer facture" />
+                                      <>
+                                        <ActionMenuItem onClick={() => handleOpenChoiceModal(q)} icon={Send} label="Générer facture classique" />
+                                        <ActionMenuItem onClick={() => handleConvertToEInvoice(q)} icon={FileText} label="⚡ Convertir en E-Facture" disabled={generating} />
+                                      </>
                                     )}
                                     {hasPermission('quotes.edit') && (q.status === 'Brouillon' || q.status === 'Refusé' || q.status === 'Envoyé') && (
                                       <ActionMenuItem onClick={() => handleEditQuote(q)} icon={Edit2} label="Modifier" />
@@ -798,9 +936,18 @@ export default function Quotes() {
                             </button>
                           )}
                           {hasPermission('invoices.create') && q.status === 'Accepté' && !hasInvoiceForQuote(q.$id) && (
-                            <button onClick={() => handleOpenChoiceModal(q)} className="flex flex-col items-center justify-center p-2 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg active:scale-95 transition-transform">
-                              <Send size={18} /> <span className="text-[10px] mt-1 font-medium">Facture</span>
-                            </button>
+                            <>
+                              <button onClick={() => handleOpenChoiceModal(q)} className="flex flex-col items-center justify-center p-2 text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30 rounded-lg active:scale-95 transition-transform">
+                                <Send size={18} /> <span className="text-[10px] mt-1 font-medium">Facture</span>
+                              </button>
+                              <button 
+                                onClick={() => handleConvertToEInvoice(q)} 
+                                disabled={generating}
+                                className="flex flex-col items-center justify-center p-2 text-emerald-600 bg-emerald-50 dark:bg-emerald-900/30 rounded-lg active:scale-95 transition-transform disabled:opacity-50"
+                              >
+                                <FileText size={18} /> <span className="text-[10px] mt-1 font-medium">E-Facture</span>
+                              </button>
+                            </>
                           )}
                           {hasPermission('quotes.delete') && (
                             <button onClick={() => handleArchive(q.$id, q.quoteNumber)} className="flex flex-col items-center justify-center p-2 text-orange-600 bg-orange-50 dark:bg-orange-900/30 rounded-lg active:scale-95 transition-transform">

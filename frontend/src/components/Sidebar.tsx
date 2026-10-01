@@ -15,7 +15,7 @@ import {
   LayoutDashboard, Users, UserCheck, Package, FileText, Receipt,
   Bell, Wallet, FileCheck, LogOut, ChevronLeft,
   ChevronRight, Moon, Sun, Menu, X, Building2, Shield,
-  AlertCircle
+  AlertCircle,
 } from 'lucide-react';
 
 // ============================================================
@@ -184,11 +184,21 @@ export default function Sidebar({ children }: SidebarProps) {
                 {item.badge! > 99 ? '99+' : item.badge}
               </span>
             )}
+            {item.badgeLabel && (
+              <span className="text-[9px] font-bold bg-blue-100 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+                {item.badgeLabel}
+              </span>
+            )}
           </>
         )}
 
         {collapsed && showBadge && (
           <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 rounded-full border-2 border-white dark:border-slate-800 shadow-sm" />
+        )}
+        {collapsed && item.badgeLabel && (
+          <span className="absolute -top-1 -right-1 text-[8px] font-bold bg-blue-600 text-white rounded-full border-2 border-white dark:border-slate-800 shadow-sm px-1">
+            {item.badgeLabel.slice(2)}
+          </span>
         )}
       </button>
     );

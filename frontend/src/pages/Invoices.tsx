@@ -18,6 +18,7 @@ import {
   Search, Download, Filter, CheckCircle2, Receipt, DollarSign,
   Archive, RotateCcw, Eye, X, FileText, FileMinus, AlertTriangle, RefreshCw,
   Banknote, FileCheck2, Link2,
+  Zap, FileCode, Send, Clock,
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 import { jsPDF } from 'jspdf';
@@ -46,8 +47,16 @@ interface Invoice {
   clientName?: string; clientAddress?: string; clientBillingAddress?: string; clientEmail?: string; clientPhone?: string;
   items?: string; paymentMethods?: string; paymentConditions?: string; executionDelay?: string;
   specialConditions?: string; tradeType?: string; insuranceName?: string; insuranceAddress?: string; insurancePolicy?: string;
-  notes?: string; payments?: string | Payment[]; createdAt?: string; type?: string;
+   notes?: string; payments?: string | Payment[]; createdAt?: string; type?: string;
   originalQuoteId?: string; originalInvoiceId?: string; advancePercent?: string; currencyCode?: string;
+  // ✅ E-FACTURATION
+  isElectronic?: boolean;
+  transmissionStatus?: 'draft' | 'ready' | 'transmitted' | 'accepted' | 'rejected' | 'disputed' | 'cancelled';
+  xmlContent?: string;
+  pdfHash?: string;
+  einvoicePlatform?: 'ppf' | 'pdp' | 'od';
+  einvoiceFormat?: 'factur-x' | 'ubl' | 'cii';
+  transmissionReference?: string;
 }
 
 interface QuoteDetail {
@@ -75,11 +84,31 @@ const typeToneMap: Record<string, DotTone> = {
 
 const paymentMethodsList = ['Virement bancaire', 'Chèque', 'Espèces', 'Carte bancaire', 'Prélèvement SEPA', 'Autre'];
 
+// ✅ STATUTS DE TRANSMISSION E-FACTURE
+const transmissionStatusLabels: Record<string, string> = {
+  draft: 'Brouillon',
+  ready: 'Prête à transmettre',
+  transmitted: 'Transmise',
+  accepted: 'Acceptée',
+  rejected: 'Rejetée',
+  disputed: 'Contestée',
+  cancelled: 'Annulée',
+};
+
+const transmissionStatusColors: Record<string, string> = {
+  draft: 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300',
+  ready: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
+  transmitted: 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300',
+  accepted: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300',
+  rejected: 'bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300',
+  disputed: 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300',
+  cancelled: 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400',
+};
+
 const toInt = (value: any, fallback: number = 0): number => {
   const n = Number(value);
   return isNaN(n) ? fallback : Math.round(n);
 };
-
 // ============================================================
 // 🧩 COMPOSANT PRINCIPAL
 // ============================================================
@@ -101,7 +130,8 @@ export default function Invoices() {
   const [viewMode, setViewMode] = useState<'active' | 'archived'>('active');
 
   // ✅ Onglet de type de document
-  const [typeTab, setTypeTab] = useState<'all' | 'standard' | 'advance' | 'credit'>('all');
+    // ✅ Onglet de type de document (avec e-factures)
+  const [typeTab, setTypeTab] = useState<'all' | 'standard' | 'advance' | 'credit' | 'einvoice'>('all');
 
   // ✅ Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -398,6 +428,27 @@ export default function Invoices() {
         .sort((a, b) => new Date(b.issueDate || 0).getTime() - new Date(a.issueDate || 0).getTime());
     };
   }, [invoices]);
+  // ✅ TÉLÉCHARGEMENT XML FACTUR-X
+  const handleDownloadXml = (inv: Invoice) => {
+    if (!inv.xmlContent) {
+      toast.warning('Cette facture n\'a pas de contenu XML Factur-X.');
+      return;
+    }
+    try {
+      const blob = new Blob([inv.xmlContent], { type: 'application/xml;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `factur-x_${inv.invoiceNumber.replace(/[^a-zA-Z0-9]/g, '_')}.xml`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+      toast.success('XML Factur-X téléchargé', { description: `Facture ${inv.invoiceNumber}` });
+    } catch (e: any) {
+      toast.error(`Erreur : ${e.message}`);
+    }
+  };
 
   // ============================================================
   // 🔄 EFFETS
@@ -1424,13 +1475,17 @@ export default function Invoices() {
   };
 
   // ✅ FILTRAGE avec typeTab
-  const filtered = invoices.filter(inv => {
+   const filtered = invoices.filter(inv => {
     if (!inv) return false;
     const searchStr = `${inv.invoiceNumber} ${inv.clientName} ${inv.status} ${inv.total}`.toLowerCase();
     const matchSearch = search === '' || searchStr.includes(search.toLowerCase());
     const matchStatus = filterStatus === 'all' || inv.status === filterStatus;
     const matchType = filterType === 'all' || inv.type === filterType;
-    const matchTypeTab = typeTab === 'all' || inv.type === typeTab;
+    // ✅ Gestion de l'onglet E-Factures
+    const matchTypeTab =
+      typeTab === 'all' ? true :
+      typeTab === 'einvoice' ? inv.isElectronic === true :
+      (inv.type === typeTab && !inv.isElectronic);
     const matchView = viewMode === 'active' ? !isDocArchived(inv) : isDocArchived(inv);
     return matchSearch && matchStatus && matchType && matchTypeTab && matchView;
   });
@@ -1488,11 +1543,12 @@ export default function Invoices() {
   const finalInvoiceIds = new Set(invoices.filter(i => i && i.type === 'standard' && i.originalInvoiceId && invoices.find(a => a && a.$id === i.originalInvoiceId && a.type === 'advance')).map(i => i.$id));
 
   // ✅ DÉFINITION DES 4 ONGLETS TypeTabs
-  const typeTabs = [
+    const typeTabs = [
     { key: 'all', label: 'Toutes', count: invoices.filter(i => i && !isDocArchived(i)).length },
-    { key: 'standard', label: 'Factures', count: invoices.filter(i => i && i.type === 'standard' && !isDocArchived(i)).length },
+    { key: 'standard', label: 'Factures', count: invoices.filter(i => i && i.type === 'standard' && !i.isElectronic && !isDocArchived(i)).length },
     { key: 'advance', label: 'Acomptes', count: invoices.filter(i => i && i.type === 'advance' && !isDocArchived(i)).length },
     { key: 'credit', label: 'Avoirs', count: invoices.filter(i => i && i.type === 'credit' && !isDocArchived(i)).length },
+    { key: 'einvoice', label: '⚡ E-Factures', count: invoices.filter(i => i && i.isElectronic === true && !isDocArchived(i)).length },
   ];
 
   if (permLoading || settingsLoading) {
@@ -1562,10 +1618,23 @@ export default function Invoices() {
         {inv.quoteId && (
           <ActionMenuItem onClick={() => handleViewQuote(inv.quoteId!)} icon={Eye} label="Voir le devis" />
         )}
-        <ActionMenuItem onClick={() => generatePDF(inv)} icon={Download} label="Télécharger PDF" />
-        {hasPermission('invoices.delete') && (
-          <ActionMenuItem onClick={() => handleArchive(inv.$id, inv.invoiceNumber)} icon={Archive} label="Archiver" danger />
-        )}
+                  <ActionMenuItem onClick={() => generatePDF(inv)} icon={Download} label="Télécharger PDF" />
+
+          {/* ✅ ACTIONS E-FACTURE */}
+          {inv.isElectronic && inv.xmlContent && (
+            <ActionMenuItem onClick={() => handleDownloadXml(inv)} icon={FileCode} label="Télécharger XML Factur-X" />
+          )}
+          {inv.isElectronic && inv.transmissionStatus === 'ready' && (
+            <ActionMenuItem
+              onClick={() => toast.info('La transmission à la plateforme sera disponible dans une prochaine mise à jour.')}
+              icon={Send}
+              label="⚡ Transmettre à la plateforme"
+            />
+          )}
+
+          {hasPermission('invoices.delete') && (
+            <ActionMenuItem onClick={() => handleArchive(inv.$id, inv.invoiceNumber)} icon={Archive} label="Archiver" danger />
+          )}
       </>
     );
   };
@@ -1707,11 +1776,26 @@ export default function Invoices() {
                       const mappedStatus = mapInvoiceStatusToShared(inv.status, inv.type, creditStatus);
                       return (
                         <tr key={inv.$id} className="hover:bg-slate-50 dark:hover:bg-slate-700/30 transition-colors group">
-                          <td className="px-4 py-3">
+                                                    <td className="px-4 py-3">
                             <div className="flex flex-col gap-1">
-                              {/* ✅ Hash supprimé */}
-                              <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">{inv.invoiceNumber}</span>
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-semibold text-slate-900 dark:text-white">{inv.invoiceNumber}</span>
+                                {inv.isElectronic && (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[10px] font-bold bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded">
+                                    <Zap size={10} /> E-Facture
+                                  </span>
+                                )}
+                              </div>
                               <DotLabel label={typeLabels[inv.type || 'standard']} tone={typeToneMap[inv.type || 'standard'] || 'slate'} />
+                              {inv.isElectronic && inv.transmissionStatus && (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full w-fit ${transmissionStatusColors[inv.transmissionStatus]}`}>
+                                  {inv.transmissionStatus === 'accepted' && <CheckCircle2 size={10} />}
+                                  {inv.transmissionStatus === 'rejected' && <X size={10} />}
+                                  {inv.transmissionStatus === 'transmitted' && <Send size={10} />}
+                                  {inv.transmissionStatus === 'ready' && <Clock size={10} />}
+                                  {transmissionStatusLabels[inv.transmissionStatus]}
+                                </span>
+                              )}
                             </div>
                           </td>
                           <td className="px-4 py-3">
@@ -1797,15 +1881,26 @@ export default function Invoices() {
                       <div className="flex items-start justify-between gap-3 mb-3">
                         <div className="flex items-start gap-3 min-w-0 flex-1">
                           <Avatar client={getEntity(inv)} />
-                          <div className="min-w-0 flex-1">
-                            {/* ✅ Hash supprimé */}
+                                                  <div className="min-w-0 flex-1">
+                          <div className="flex items-center gap-2 flex-wrap">
                             <span className="font-mono text-xs font-semibold text-slate-900 dark:text-white">{inv.invoiceNumber}</span>
-                            <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{inv.clientName || '-'}</p>
-                            <div className="flex items-center gap-2 mt-1">
-                              <DotLabel label={typeLabels[inv.type || 'standard']} tone={typeToneMap[inv.type || 'standard'] || 'slate'} />
-                              <span className="text-[11px] text-slate-500 dark:text-slate-400">{formatDate(inv.issueDate)}</span>
-                            </div>
+                            {inv.isElectronic && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-blue-500 to-indigo-500 text-white rounded">
+                                <Zap size={9} /> E-Facture
+                              </span>
+                            )}
                           </div>
+                          <p className="text-sm font-semibold text-slate-900 dark:text-white truncate">{inv.clientName || '-'}</p>
+                          <div className="flex items-center gap-2 mt-1">
+                            <DotLabel label={typeLabels[inv.type || 'standard']} tone={typeToneMap[inv.type || 'standard'] || 'slate'} />
+                            <span className="text-[11px] text-slate-500 dark:text-slate-400">{formatDate(inv.issueDate)}</span>
+                          </div>
+                          {inv.isElectronic && inv.transmissionStatus && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full mt-1.5 ${transmissionStatusColors[inv.transmissionStatus]}`}>
+                              {transmissionStatusLabels[inv.transmissionStatus]}
+                            </span>
+                          )}
+                        </div>
                         </div>
                         <div className="flex items-start gap-2">
                           <StatusIndicator status={mappedStatus} />

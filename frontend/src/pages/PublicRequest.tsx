@@ -1,8 +1,8 @@
 import { useState, useEffect } from 'react';
-import { Query, ID as AppwriteID, Permission, Role } from 'appwrite'; // <-- AJOUTER Permission et Role
+import { Query, ID as AppwriteID } from 'appwrite';
 import { useParams, useNavigate } from 'react-router-dom';
 import { databases, DATABASE_ID } from '../appwrite';
-import { Building2, CheckCircle2, AlertCircle, Send } from 'lucide-react';
+import { Building2, CheckCircle2, AlertCircle, Send, Briefcase, User, Shield } from 'lucide-react';
 
 export default function PublicRequest() {
   const { slug } = useParams();
@@ -13,13 +13,21 @@ export default function PublicRequest() {
   const [success, setSuccess] = useState(false);
   const [error, setError] = useState('');
 
+  // ✅ NOUVEAU : Type de demandeur
+  const [isProfessional, setIsProfessional] = useState(false);
+
   const [form, setForm] = useState({
     firstName: '',
     lastName: '',
     phone: '',
     email: '',
     address: '',
-    needs: ''
+    needs: '',
+    // ✅ NOUVEAUX CHAMPS (Réforme 2026)
+    companyName: '',
+    siren: '',        // 9 chiffres (entreprise FR)
+    siret: '',        // 14 chiffres (établissement FR)
+    vatNumber: '',    // N° TVA intracommunautaire
   });
   const [rgpdAccepted, setRgpdAccepted] = useState(false);
 
@@ -43,7 +51,27 @@ export default function PublicRequest() {
     if (slug) fetchCompany();
   }, [slug]);
 
-        const handleSubmit = async (e: React.FormEvent) => {
+  // ✅ Validation douce (non bloquante pour les prospects)
+  const validateProfessionalFields = (): string | null => {
+    if (!isProfessional) return null;
+
+    // Si entreprise FR avec SIREN fourni → valider le format
+    if (form.siren && !/^\d{9}$/.test(form.siren)) {
+      return 'Le SIREN doit contenir exactement 9 chiffres.';
+    }
+    if (form.siret && !/^\d{14}$/.test(form.siret)) {
+      return 'Le SIRET doit contenir exactement 14 chiffres.';
+    }
+    if (form.vatNumber && !/^FR[0-9A-Z]{2}\d{9}$/.test(form.vatNumber.toUpperCase())) {
+      return 'Le numéro de TVA doit être au format FR + 2 caractères + 9 chiffres.';
+    }
+    if (isProfessional && !form.companyName.trim()) {
+      return 'Veuillez indiquer le nom de votre entreprise.';
+    }
+    return null;
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!rgpdAccepted) {
       setError('Vous devez accepter les conditions pour être recontacté.');
@@ -51,6 +79,13 @@ export default function PublicRequest() {
     }
     if (!form.firstName || !form.phone) {
       setError('Le prénom et le téléphone sont obligatoires.');
+      return;
+    }
+
+    // ✅ Validation des champs professionnels
+    const proError = validateProfessionalFields();
+    if (proError) {
+      setError(proError);
       return;
     }
 
@@ -64,20 +99,34 @@ export default function PublicRequest() {
 
     try {
       let existingProspect = null;
-      
-      // Vérification des doublons (ignorée si non autorisé)
+
       if (form.email || form.phone) {
         try {
           const response = await databases.listDocuments(DATABASE_ID, 'prospects', [
-            Query.equal('teamId', company.teamId) 
+            Query.equal('teamId', company.teamId)
           ]);
-          existingProspect = response.documents.find((p: any) => 
+          existingProspect = response.documents.find((p: any) =>
             (form.email && p.email === form.email) || (form.phone && p.phone === form.phone)
           );
         } catch (checkErr) {
           console.warn("⚠️ Vérification des doublons ignorée.");
         }
       }
+
+      // ✅ Données e-facturation (seulement si professionnel)
+      const professionalData = isProfessional ? {
+        companyName: form.companyName,
+        siren: form.siren,
+        siret: form.siret,
+        vatNumber: form.vatNumber.toUpperCase(),
+        country: 'FR', // Formulaire public = France par défaut
+      } : {
+        companyName: '',
+        siren: '',
+        siret: '',
+        vatNumber: '',
+        country: 'FR',
+      };
 
       if (existingProspect) {
         const newData = {
@@ -86,12 +135,14 @@ export default function PublicRequest() {
           phone: form.phone || existingProspect.phone,
           email: form.email || existingProspect.email,
           address: form.address || existingProspect.address,
-          needs: form.needs 
-            ? `[${new Date().toLocaleDateString('fr-FR')}] ${form.needs}\n---\n${existingProspect.needs || ''}` 
+          needs: form.needs
+            ? `[${new Date().toLocaleDateString('fr-FR')}] ${form.needs}\n---\n${existingProspect.needs || ''}`
             : existingProspect.needs,
           source: 'website',
           status: 'new',
-          teamId: company.teamId
+          teamId: company.teamId,
+          // ✅ On complète les données pro si fournies, sinon on garde l'existant
+          ...(isProfessional && form.companyName ? professionalData : {}),
         };
 
         await databases.updateDocument(DATABASE_ID, 'prospects', existingProspect.$id, newData);
@@ -106,17 +157,16 @@ export default function PublicRequest() {
           needs: form.needs,
           source: 'website',
           status: 'new',
-          teamId: company.teamId
+          teamId: company.teamId,
+          // ✅ NOUVEAUX CHAMPS
+          ...professionalData,
         };
 
-        // ✅ CRUCIAL : Ne passer AUCUNE permission (undefined)
-        // Les permissions de la collection gèrent déjà l'accès
         await databases.createDocument(
-          DATABASE_ID, 
-          'prospects', 
-          AppwriteID.unique(), 
+          DATABASE_ID,
+          'prospects',
+          AppwriteID.unique(),
           newData
-          // Pas de 5ème argument = pas de permissions personnalisées
         );
         console.log('✅ Nouveau prospect créé avec teamId:', company.teamId);
       }
@@ -154,7 +204,10 @@ export default function PublicRequest() {
         <div className="bg-white p-8 rounded-xl shadow-lg text-center max-w-md">
           <CheckCircle2 size={48} className="mx-auto text-green-500 mb-4" />
           <h2 className="text-xl font-bold text-slate-900 mb-2">Demande envoyée !</h2>
-          <p className="text-slate-600 mb-6">Merci {form.firstName}. <strong>{company.name}</strong> a bien reçu votre demande et vous recontactera très prochainement au {form.phone}.</p>
+          <p className="text-slate-600 mb-6">
+            Merci {form.firstName}{isProfessional && form.companyName ? ` de ${form.companyName}` : ''}.{' '}
+            <strong>{company.name}</strong> a bien reçu votre demande et vous recontactera très prochainement au {form.phone}.
+          </p>
           <button onClick={() => window.location.reload()} className="text-blue-600 font-medium hover:underline">Envoyer une autre demande</button>
         </div>
       </div>
@@ -173,7 +226,7 @@ export default function PublicRequest() {
 
         <div className="p-6 sm:p-8">
           <h2 className="text-xl font-semibold text-slate-900 mb-6 text-center">Demandez votre devis gratuit</h2>
-          
+
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg mb-6 flex items-center gap-2 text-sm">
               <AlertCircle size={16} /> {error}
@@ -181,35 +234,137 @@ export default function PublicRequest() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-5">
+            {/* ✅ NOUVEAU : Toggle Particulier / Professionnel */}
+            <div className="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setIsProfessional(false)}
+                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-md text-sm font-medium transition-all ${
+                  !isProfessional
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <User size={16} />
+                Particulier
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsProfessional(true)}
+                className={`flex items-center justify-center gap-2 py-2.5 px-3 rounded-md text-sm font-medium transition-all ${
+                  isProfessional
+                    ? 'bg-white text-blue-600 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Briefcase size={16} />
+                Professionnel
+              </button>
+            </div>
+
+            {/* ✅ Champs entreprise (si professionnel) */}
+            {isProfessional && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 space-y-4">
+                <div className="flex items-start gap-2 text-xs text-blue-800">
+                  <Shield size={14} className="flex-shrink-0 mt-0.5" />
+                  <p>
+                    <strong>Demande professionnelle :</strong> renseignez votre raison sociale.
+                    Le SIREN/SIRET est <strong>recommandé</strong> pour accélérer le traitement
+                    (obligatoire pour la facturation électronique B2B en France).
+                  </p>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Raison sociale *
+                  </label>
+                  <input
+                    type="text"
+                    value={form.companyName}
+                    onChange={e => setForm({ ...form, companyName: e.target.value })}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
+                    placeholder="Ex : Dupont Plomberie SARL"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      SIREN <span className="text-xs text-slate-400 font-normal">(9 chiffres)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={form.siren}
+                      onChange={e => setForm({ ...form, siren: e.target.value.replace(/\D/g, '').slice(0, 9) })}
+                      maxLength={9}
+                      className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono"
+                      placeholder="123456789"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 mb-1">
+                      SIRET <span className="text-xs text-slate-400 font-normal">(14 chiffres)</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={form.siret}
+                      onChange={e => setForm({ ...form, siret: e.target.value.replace(/\D/g, '').slice(0, 14) })}
+                      maxLength={14}
+                      className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono"
+                      placeholder="12345678901234"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    N° TVA intracommunautaire <span className="text-xs text-slate-400 font-normal">(optionnel)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={form.vatNumber}
+                    onChange={e => setForm({ ...form, vatNumber: e.target.value.toUpperCase() })}
+                    className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm font-mono"
+                    placeholder="FR12345678901"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Coordonnées du contact */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Prénom *</label>
-                <input required type="text" value={form.firstName} onChange={e => setForm({...form, firstName: e.target.value})} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                <input required type="text" value={form.firstName} onChange={e => setForm({ ...form, firstName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Nom *</label>
-                <input required type="text" value={form.lastName} onChange={e => setForm({...form, lastName: e.target.value})} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+                <label className="block text-sm font-medium text-slate-700 mb-1">
+                  {isProfessional ? 'Nom du contact' : 'Nom'} *
+                </label>
+                <input required type="text" value={form.lastName} onChange={e => setForm({ ...form, lastName: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Téléphone *</label>
-              <input required type="tel" value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="06 12 34 56 78" />
+              <input required type="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="06 12 34 56 78" />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>
-              <input type="email" value={form.email} onChange={e => setForm({...form, email: e.target.value})} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="votre@email.com" />
+              <input type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="votre@email.com" />
             </div>
 
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Adresse du chantier (optionnel)</label>
-              <input type="text" value={form.address} onChange={e => setForm({...form, address: e.target.value})} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
+              <label className="block text-sm font-medium text-slate-700 mb-1">
+                {isProfessional ? "Adresse de l'entreprise" : 'Adresse du chantier'} (optionnel)
+              </label>
+              <input type="text" value={form.address} onChange={e => setForm({ ...form, address: e.target.value })} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" />
             </div>
 
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Décrivez votre besoin</label>
-              <textarea value={form.needs} onChange={e => setForm({...form, needs: e.target.value})} rows={4} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="Ex: Rénovation complète de la salle de bain, environ 5m²..."></textarea>
+              <textarea value={form.needs} onChange={e => setForm({ ...form, needs: e.target.value })} rows={4} className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm" placeholder="Ex: Rénovation complète de la salle de bain, environ 5m²..."></textarea>
             </div>
 
             <div className="flex items-start gap-3 pt-2">

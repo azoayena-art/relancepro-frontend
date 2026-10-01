@@ -89,7 +89,7 @@ function AppRoutes() {
       {/* --- Factures --- */}
       <Route path="/invoices" element={<ProtectedRoute><Invoices /></ProtectedRoute>} />
       <Route path="/invoices/:id" element={<ProtectedRoute><InvoiceDetail /></ProtectedRoute>} />
-
+    
       <Route path="/receipts" element={<ProtectedRoute><Receipts /></ProtectedRoute>} />
 
       <Route path="/reminders" element={<ProtectedRoute><Reminders /></ProtectedRoute>} />

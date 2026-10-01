@@ -14,7 +14,8 @@ import {
 } from '../components/ui/SharedUI';
 import {
   Plus, Search, Edit2, Phone, Mail, Building, FileText,
-  Users, Filter, AlertCircle, UserCheck, Archive, RotateCcw
+  Users, Filter, AlertCircle, UserCheck, Archive, RotateCcw,
+  Globe, Shield, MapPin
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 
@@ -33,6 +34,10 @@ interface Prospect {
   firstContactDate?: string;
   lastContactDate?: string;
   teamId?: string;
+  country?: string;      // ✅ NOUVEAU : Pays (FR par défaut)
+  siren?: string;        // ✅ NOUVEAU : 9 chiffres (entreprise FR)
+  siret?: string;        // ✅ NOUVEAU : 14 chiffres (établissement FR)
+  vatNumber?: string;    // ✅ NOUVEAU : N° TVA intracommunautaire
   $createdAt?: string;
 }
 
@@ -71,7 +76,11 @@ const emptyForm = {
   source: 'other',
   status: 'new',
   needs: '',
-  notes: ''
+  notes: '',
+  country: 'FR',      // ✅ NOUVEAU
+  siren: '',          // ✅ NOUVEAU
+  siret: '',          // ✅ NOUVEAU
+  vatNumber: ''       // ✅ NOUVEAU
 };
 
 export default function Prospects() {
@@ -100,6 +109,10 @@ export default function Prospects() {
 
   const ITEMS_PER_PAGE = 20;
 
+  // ✅ Détection : Entreprise française = obligation e-facturation B2B
+  const isFrenchCompany = !!form.companyName?.trim() && form.country === 'FR';
+  const isCompany = !!form.companyName?.trim();
+
   // ⌘K / Ctrl+K : focus recherche
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -121,7 +134,7 @@ export default function Prospects() {
     loadProspects();
   }, [user, viewMode]);
 
-    const loadProspects = async (background = false) => {
+  const loadProspects = async (background = false) => {
     if (!background) setLoading(true);
     try {
       let teamId = null;
@@ -131,11 +144,6 @@ export default function Prospects() {
         const membersRes = await databases.listDocuments(DATABASE_ID, 'team_members', [Query.equal('userId', user.$id)]);
         if (membersRes.documents.length > 0) teamId = membersRes.documents[0].teamId;
       }
-      
-      // ✅ AJOUTEZ CES LOGS POUR VÉRIFIER L'INCOHÉRENCE
-      console.log("🔍 DEBUG Prospects.tsx - teamId résolu pour la recherche:", teamId);
-      console.log("🔍 DEBUG Prospects.tsx - user.$id:", user.$id);
-
       if (!teamId) { if (!background) setLoading(false); return; }
       setCurrentTeamId(teamId);
       
@@ -143,12 +151,6 @@ export default function Prospects() {
         DATABASE_ID, 'prospects',
         [Query.equal('teamId', teamId), Query.orderDesc('$createdAt'), Query.limit(2000)]
       );
-      
-      console.log("🔍 DEBUG Prospects.tsx - Nombre de documents trouvés:", response.documents.length);
-      if (response.documents.length > 0) {
-        console.log("🔍 DEBUG Prospects.tsx - teamId du premier prospect trouvé:", response.documents[0].teamId);
-      }
-      
       setProspects(response.documents as unknown as Prospect[]);
     } catch (error) {
       console.error('❌ Erreur chargement prospects:', error);
@@ -189,7 +191,11 @@ export default function Prospects() {
       source: prospect.source || 'other',
       status: prospect.status === 'archived' ? 'new' : prospect.status,
       needs: prospect.needs || '',
-      notes: prospect.notes || ''
+      notes: prospect.notes || '',
+      country: prospect.country || 'FR',      // ✅ NOUVEAU
+      siren: prospect.siren || '',            // ✅ NOUVEAU
+      siret: prospect.siret || '',            // ✅ NOUVEAU
+      vatNumber: prospect.vatNumber || ''     // ✅ NOUVEAU
     });
     setShowModal(true);
   };
@@ -199,6 +205,19 @@ export default function Prospects() {
       toast.error('Champs requis', { description: 'Veuillez remplir le prénom et le nom.' });
       return;
     }
+
+    // ✅ VALIDATION SPÉCIFIQUE FRANCE - ENTREPRISE (Réforme 2026)
+    if (isFrenchCompany) {
+      if (!form.siren || !/^\d{9}$/.test(form.siren)) {
+        toast.error('SIREN obligatoire', { description: 'Pour une entreprise en France, le SIREN (9 chiffres) est requis pour l\'e-facturation B2B.' });
+        return;
+      }
+      if (!form.siret || !/^\d{14}$/.test(form.siret)) {
+        toast.error('SIRET obligatoire', { description: 'Pour une entreprise en France, le SIRET (14 chiffres) est requis pour identifier l\'établissement.' });
+        return;
+      }
+    }
+
     if (!currentTeamId) {
       toast.error('Erreur', { description: 'Aucune équipe trouvée' });
       return;
@@ -209,7 +228,14 @@ export default function Prospects() {
     }
     setSaving(true);
     try {
-      const data = { ...form, teamId: currentTeamId };
+      const data = { 
+        ...form, 
+        teamId: currentTeamId,
+        // ✅ Nettoyer les champs si non pertinents
+        siren: isFrenchCompany ? form.siren : '',
+        siret: isFrenchCompany ? form.siret : '',
+        vatNumber: isCompany ? form.vatNumber : '',
+      };
       let perms: string[] = [];
       if (user?.secureTeamId) {
         perms = [
@@ -252,6 +278,19 @@ export default function Prospects() {
       toast.error('Erreur de sécurité', { description: 'Équipe native non chargée.' });
       return;
     }
+
+    // ✅ Validation SIREN/SIRET si entreprise française
+    if (prospect.companyName && (prospect.country || 'FR') === 'FR') {
+      if (!prospect.siren || !/^\d{9}$/.test(prospect.siren)) {
+        toast.error('Conversion impossible', { description: 'Le SIREN (9 chiffres) est requis pour convertir une entreprise française en client.' });
+        return;
+      }
+      if (!prospect.siret || !/^\d{14}$/.test(prospect.siret)) {
+        toast.error('Conversion impossible', { description: 'Le SIRET (14 chiffres) est requis pour convertir une entreprise française en client.' });
+        return;
+      }
+    }
+
     setConverting(true);
     try {
       const currentYear = new Date().getFullYear();
@@ -277,12 +316,16 @@ export default function Prospects() {
           userId: user.$id,
           clientId: newClientId,
           type: prospect.companyName ? 'entreprise' : 'particulier',
+          country: prospect.country || 'FR',     // ✅ NOUVEAU
           firstName: prospect.firstName,
           lastName: prospect.lastName,
           companyName: prospect.companyName || '',
           email: prospect.email || '',
           phone: prospect.phone || '',
           address: prospect.address || '',
+          siren: prospect.siren || '',           // ✅ NOUVEAU
+          siret: prospect.siret || '',           // ✅ NOUVEAU
+          vatNumber: prospect.vatNumber || '',   // ✅ NOUVEAU
           notes: prospect.notes ? `Converti depuis le prospect.\nNotes d'origine: ${prospect.notes}` : 'Converti depuis un prospect',
           status: 'active',
           prospectId: prospect.$id
@@ -297,7 +340,7 @@ export default function Prospects() {
       setProspectToConvert(null);
       await loadProspects(true);
       toast.success('Prospect converti en client', {
-        description: `Numéro client : ${newClientId}`,
+        description: `Numéro client : ${newClientId}${prospect.companyName && prospect.country === 'FR' ? ' • SIREN/SIRET transférés' : ''}`,
         action: { label: 'Voir les clients', onClick: () => navigate('/clients') },
       });
     } catch (error: any) {
@@ -383,13 +426,11 @@ export default function Prospects() {
   const trendQuote = calcTrend(p => p.status !== 'archived' && p.status === 'quote_sent');
   const trendWon = calcTrend(p => p.status === 'won');
 
-  // ✅ Onglets migrés vers TypeTabs
   const viewTabs = [
     { key: 'active', label: 'Actifs', count: totalActive },
     { key: 'archived', label: 'Archivés', count: totalArchived },
   ];
 
-  // Pagination
   const totalPages = Math.ceil(filtered.length / ITEMS_PER_PAGE);
   const paginatedProspects = filtered.slice(
     (currentPage - 1) * ITEMS_PER_PAGE,
@@ -412,7 +453,6 @@ export default function Prospects() {
   return (
     <Sidebar>
       <div className="min-h-full bg-slate-50 dark:bg-slate-900">
-        {/* ✅ EN-TÊTE migré vers PageHeader */}
         <PageHeader
           icon={Users}
           iconColor="purple"
@@ -434,7 +474,6 @@ export default function Prospects() {
         />
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-          {/* ✅ KPIs migrés vers KPIGrid + StatCell */}
           <KPIGrid columns={4}>
             <StatCell value={totalActive} trend={trendActive} label="Prospects actifs" active={activeStat === 0} onClick={() => setActiveStat(0)} />
             <StatCell value={totalNew} trend={trendNew} label="Nouveaux" active={activeStat === 1} onClick={() => setActiveStat(1)} />
@@ -442,7 +481,6 @@ export default function Prospects() {
             <StatCell value={totalWon} trend={trendWon} label="Gagnés" active={activeStat === 3} onClick={() => setActiveStat(3)} />
           </KPIGrid>
 
-          {/* ✅ ONGLETS migrés vers TypeTabs */}
           <TypeTabs
             tabs={viewTabs}
             activeTab={viewMode}
@@ -450,7 +488,6 @@ export default function Prospects() {
             color="purple"
           />
 
-          {/* RECHERCHE + FILTRES */}
           <div className="flex flex-col sm:flex-row gap-3 mb-6">
             <div className="relative flex-1">
               <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -513,7 +550,6 @@ export default function Prospects() {
             </div>
           ) : (
             <>
-              {/* TABLEAU DESKTOP */}
               <div className="hidden md:block bg-white dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700 shadow-sm overflow-visible">
                 <div className="overflow-visible">
                   <table className="w-full">
@@ -589,7 +625,6 @@ export default function Prospects() {
                 </div>
               </div>
 
-              {/* CARTES MOBILE */}
               <div className="md:hidden space-y-4">
                 {paginatedProspects.map((p) => (
                   <div key={p.$id} className="bg-white dark:bg-slate-800 rounded-2xl border border-slate-200 dark:border-slate-700 p-5 shadow-sm transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5">
@@ -656,7 +691,6 @@ export default function Prospects() {
                 ))}
               </div>
 
-              {/* ✅ PAGINATION ajoutée */}
               <Pagination
                 currentPage={currentPage}
                 totalPages={totalPages}
@@ -670,7 +704,7 @@ export default function Prospects() {
           )}
         </main>
 
-        {/* MODAL Création / Édition - migré vers Modal */}
+        {/* MODAL Création / Édition */}
         <Modal
           open={showModal}
           onClose={() => { setShowModal(false); setDuplicateFound(null); }}
@@ -697,6 +731,8 @@ export default function Prospects() {
                 </div>
               </div>
             )}
+
+            {/* ✅ Nom + Prénom */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Prénom *</label>
@@ -707,10 +743,139 @@ export default function Prospects() {
                 <input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="Dupont" />
               </div>
             </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5"><Building size={12} />Entreprise</label>
-              <input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="Dupont Plomberie" />
+
+            {/* ✅ Entreprise + Pays (Déclencheur des règles) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
+                  <Building size={12} /> Entreprise
+                  <span className="text-[9px] font-normal text-slate-400 normal-case tracking-normal">(laisser vide si particulier)</span>
+                </label>
+                <input 
+                  type="text" 
+                  value={form.companyName} 
+                  onChange={(e) => setForm({ 
+                    ...form, 
+                    companyName: e.target.value,
+                    // Reset SIREN/SIRET si on efface l'entreprise
+                    siren: !e.target.value.trim() ? '' : form.siren,
+                    siret: !e.target.value.trim() ? '' : form.siret,
+                    vatNumber: !e.target.value.trim() ? '' : form.vatNumber,
+                  })} 
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" 
+                  placeholder="Dupont Plomberie SARL" 
+                />
+              </div>
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
+                  <Globe size={12} /> Pays *
+                </label>
+                <select 
+                  value={form.country} 
+                  onChange={(e) => setForm({ ...form, country: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm"
+                >
+                  <option value="FR">🇫🇷 France</option>
+                  <option value="BE">🇧🇪 Belgique</option>
+                  <option value="CH">🇨🇭 Suisse</option>
+                  <option value="LU">🇱🇺 Luxembourg</option>
+                  <option value="DE">🇩🇪 Allemagne</option>
+                  <option value="ES">🇪🇸 Espagne</option>
+                  <option value="IT">🇮🇹 Italie</option>
+                  <option value="GB">🇬🇧 Royaume-Uni</option>
+                  <option value="US">🇺🇸 États-Unis</option>
+                  <option value="CA">🇨🇦 Canada</option>
+                  <option value="OTHER">🌍 Autre</option>
+                </select>
+              </div>
             </div>
+
+            {/* ✅ Alerte informative pour entreprises françaises */}
+            {isFrenchCompany && (
+              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-4 flex gap-3">
+                <Shield size={20} className="text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-purple-900 dark:text-purple-200">
+                    Conformité Réforme 2026
+                  </p>
+                  <p className="text-xs text-purple-800 dark:text-purple-300 mt-1">
+                    Pour un <strong>prospect professionnel en France</strong>, le SIREN et le SIRET seront obligatoires lors de la conversion en client 
+                    (e-invoicing B2B via PDP/PPF).
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ✅ SECTION IDENTIFICATION FISCALE (Entreprise FR uniquement) */}
+            {isFrenchCompany && (
+              <div className="bg-slate-50 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-4 space-y-4">
+                <h4 className="text-[11px] font-bold uppercase tracking-wider text-slate-700 dark:text-slate-300 flex items-center gap-2">
+                  <Shield size={12} className="text-purple-600 dark:text-purple-400" />
+                  Identification fiscale (Obligatoire - Réforme 2026)
+                </h4>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      SIREN (9 chiffres) *
+                    </label>
+                    <input 
+                      type="text" 
+                      value={form.siren} 
+                      onChange={(e) => setForm({ ...form, siren: e.target.value.replace(/\D/g, '').slice(0, 9) })} 
+                      placeholder="123456789" 
+                      maxLength={9}
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono"
+                    />
+                    <p className="text-[9px] text-slate-400 mt-1">Identifie l'entreprise</p>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      SIRET (14 chiffres) *
+                    </label>
+                    <input 
+                      type="text" 
+                      value={form.siret} 
+                      onChange={(e) => setForm({ ...form, siret: e.target.value.replace(/\D/g, '').slice(0, 14) })} 
+                      placeholder="12345678901234" 
+                      maxLength={14}
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono"
+                    />
+                    <p className="text-[9px] text-slate-400 mt-1">Identifie l'établissement</p>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      N° TVA intracommunautaire
+                    </label>
+                    <input 
+                      type="text" 
+                      value={form.vatNumber} 
+                      onChange={(e) => setForm({ ...form, vatNumber: e.target.value.toUpperCase() })} 
+                      placeholder="FR12345678901" 
+                      className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none font-mono"
+                    />
+                    <p className="text-[9px] text-slate-400 mt-1">Format: FR + clé + 9 chiffres SIREN</p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ✅ TVA pour entreprises hors France */}
+            {isCompany && form.country !== 'FR' && (
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  N° TVA / Identification fiscale
+                </label>
+                <input 
+                  type="text" 
+                  value={form.vatNumber} 
+                  onChange={(e) => setForm({ ...form, vatNumber: e.target.value.toUpperCase() })} 
+                  className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm font-mono"
+                  placeholder="Ex: BE0123456789, CHE-123.456.789..." 
+                />
+              </div>
+            )}
+
+            {/* Contact */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5"><Mail size={12} />Email</label>
@@ -721,6 +886,22 @@ export default function Prospects() {
                 <input type="tel" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="06 12 34 56 78" />
               </div>
             </div>
+
+            {/* Adresse */}
+            <div>
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 flex items-center gap-1.5">
+                <MapPin size={12} /> Adresse
+              </label>
+              <input 
+                type="text" 
+                value={form.address} 
+                onChange={(e) => setForm({ ...form, address: e.target.value })} 
+                className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" 
+                placeholder="123 rue de la Paix, 75000 Paris" 
+              />
+            </div>
+
+            {/* Source + Statut */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Source</label>
@@ -735,10 +916,8 @@ export default function Prospects() {
                 </select>
               </div>
             </div>
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Adresse</label>
-              <input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none shadow-sm" placeholder="123 rue de la Paix, 75000 Paris" />
-            </div>
+
+            {/* Besoins + Notes */}
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">Besoins</label>
               <textarea value={form.needs} onChange={(e) => setForm({ ...form, needs: e.target.value })} rows={2} className="w-full px-4 py-2.5 border border-slate-300 dark:border-slate-600 dark:bg-slate-700 dark:text-white rounded-lg text-sm focus:ring-2 focus:ring-purple-500 outline-none resize-none shadow-sm" placeholder="Décrivez les besoins..." />
@@ -750,7 +929,7 @@ export default function Prospects() {
           </div>
         </Modal>
 
-        {/* MODAL Confirmation conversion en client - migré vers Modal */}
+        {/* MODAL Conversion en client */}
         {prospectToConvert && (
           <Modal
             open={!!prospectToConvert}
@@ -772,13 +951,54 @@ export default function Prospects() {
               </>
             }
           >
-            <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
-              <strong className="text-slate-700 dark:text-slate-200">{prospectToConvert.firstName} {prospectToConvert.lastName}</strong> deviendra un client actif (fiche créée automatiquement) et ce prospect sera marqué comme <strong className="text-slate-700 dark:text-slate-200">Gagné</strong>.
-            </p>
+            <div className="space-y-3">
+              <p className="text-sm text-slate-500 dark:text-slate-400 text-center">
+                <strong className="text-slate-700 dark:text-slate-200">{prospectToConvert.firstName} {prospectToConvert.lastName}</strong> deviendra un client actif et ce prospect sera marqué comme <strong className="text-slate-700 dark:text-slate-200">Gagné</strong>.
+              </p>
+              
+              {/* ✅ Résumé des données qui seront transférées */}
+              <div className="bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg p-3 space-y-2">
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">Type</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">
+                    {prospectToConvert.companyName ? '🏢 Entreprise' : '👤 Particulier'}
+                  </span>
+                </div>
+                <div className="flex justify-between text-xs">
+                  <span className="text-slate-500 dark:text-slate-400">Pays</span>
+                  <span className="font-semibold text-slate-900 dark:text-white">{prospectToConvert.country || 'FR'}</span>
+                </div>
+                {prospectToConvert.companyName && (prospectToConvert.country || 'FR') === 'FR' && (
+                  <>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">SIREN</span>
+                      <span className="font-semibold font-mono text-slate-900 dark:text-white">{prospectToConvert.siren || '❌ Manquant'}</span>
+                    </div>
+                    <div className="flex justify-between text-xs">
+                      <span className="text-slate-500 dark:text-slate-400">SIRET</span>
+                      <span className="font-semibold font-mono text-slate-900 dark:text-white">{prospectToConvert.siret || '❌ Manquant'}</span>
+                    </div>
+                  </>
+                )}
+              </div>
+
+              {prospectToConvert.companyName && (prospectToConvert.country || 'FR') === 'FR' && (
+                (!prospectToConvert.siren || !prospectToConvert.siret) && (
+                  <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-3">
+                    <p className="text-xs text-red-800 dark:text-red-200 flex items-start gap-2">
+                      <AlertCircle size={14} className="flex-shrink-0 mt-0.5" />
+                      <span>
+                        <strong>SIREN et SIRET requis</strong> pour convertir une entreprise française en client (obligatoire pour l'e-facturation B2B).
+                      </span>
+                    </p>
+                  </div>
+                )
+              )}
+            </div>
           </Modal>
         )}
 
-        {/* MODAL Confirmation archivage - migré vers Modal */}
+        {/* MODAL Archivage */}
         {prospectToArchive && (
           <Modal
             open={!!prospectToArchive}

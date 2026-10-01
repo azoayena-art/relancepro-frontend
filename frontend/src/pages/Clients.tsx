@@ -35,7 +35,8 @@ import {
 } from '../components/ui/SharedUI';
 import {
   Plus, Edit2, Phone, Mail, Building,
-  UserCheck, FileText, AlertCircle, Archive, RotateCcw, Hash, Eye, User
+  UserCheck, FileText, AlertCircle, Archive, RotateCcw, Hash, Eye, User,
+  MapPin, Shield, Globe
 } from 'lucide-react';
 import { Query, ID, Permission, Role } from 'appwrite';
 
@@ -45,6 +46,7 @@ interface Client {
   userId: string;
   clientId?: string;
   type: string;
+  country: string; // ✅ NOUVEAU : Pays du client
   firstName?: string;
   lastName?: string;
   companyName?: string;
@@ -52,7 +54,10 @@ interface Client {
   phone?: string;
   address?: string;
   billingAddress?: string;
-  taxNumber?: string;
+  siren?: string;      // ✅ NOUVEAU : 9 chiffres (identifie l'entreprise)
+  siret?: string;      // ✅ NOUVEAU : 14 chiffres (identifie l'établissement)
+  vatNumber?: string;  // ✅ NOUVEAU : N° TVA intracommunautaire
+  taxNumber?: string;  // Legacy (conservé pour compatibilité)
   notes?: string;
   status: string;
   prospectId?: string;
@@ -67,6 +72,7 @@ const statusLabels: Record<string, string> = {
 
 const emptyForm = {
   type: 'particulier',
+  country: 'FR', // ✅ NOUVEAU : France par défaut
   firstName: '',
   lastName: '',
   companyName: '',
@@ -74,6 +80,9 @@ const emptyForm = {
   phone: '',
   address: '',
   billingAddress: '',
+  siren: '',       // ✅ NOUVEAU
+  siret: '',       // ✅ NOUVEAU
+  vatNumber: '',   // ✅ NOUVEAU
   taxNumber: '',
   notes: '',
   status: 'active'
@@ -106,6 +115,9 @@ export default function Clients() {
   const [itemsPerPage] = useState(10);
   
   const searchInputRef = useRef<HTMLInputElement>(null);
+
+  // ✅ Détection : Entreprise française = obligation e-facturation B2B
+  const isFrenchCompany = form.type === 'entreprise' && form.country === 'FR';
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -141,6 +153,7 @@ export default function Clients() {
         setDuplicateFound(null);
         setForm({
           type: clientToEdit.type || 'particulier',
+          country: clientToEdit.country || 'FR', // ✅ NOUVEAU
           firstName: clientToEdit.firstName || '',
           lastName: clientToEdit.lastName || '',
           companyName: clientToEdit.companyName || '',
@@ -148,6 +161,9 @@ export default function Clients() {
           phone: clientToEdit.phone || '',
           address: clientToEdit.address || '',
           billingAddress: clientToEdit.billingAddress || '',
+          siren: clientToEdit.siren || '',       // ✅ NOUVEAU
+          siret: clientToEdit.siret || '',       // ✅ NOUVEAU
+          vatNumber: clientToEdit.vatNumber || '', // ✅ NOUVEAU
           taxNumber: clientToEdit.taxNumber || '',
           notes: clientToEdit.notes || '',
           status: clientToEdit.status || 'active'
@@ -158,7 +174,6 @@ export default function Clients() {
     }
   }, [searchParams, clients, showModal, currentTeamId]);
 
-  // Reset pagination quand les filtres changent
   useEffect(() => {
     setCurrentPage(1);
   }, [search, filterStatus, filterType, viewMode]);
@@ -237,6 +252,7 @@ export default function Clients() {
     setDuplicateFound(null);
     setForm({
       type: client.type || 'particulier',
+      country: client.country || 'FR', // ✅ NOUVEAU
       firstName: client.firstName || '',
       lastName: client.lastName || '',
       companyName: client.companyName || '',
@@ -244,6 +260,9 @@ export default function Clients() {
       phone: client.phone || '',
       address: client.address || '',
       billingAddress: client.billingAddress || '',
+      siren: client.siren || '',       // ✅ NOUVEAU
+      siret: client.siret || '',       // ✅ NOUVEAU
+      vatNumber: client.vatNumber || '', // ✅ NOUVEAU
       taxNumber: client.taxNumber || '',
       notes: client.notes || '',
       status: client.status || 'active'
@@ -256,6 +275,19 @@ export default function Clients() {
       toast.error('Champs requis', { description: 'Veuillez remplir au moins le nom, le prénom ou le nom de l\'entreprise.' });
       return;
     }
+
+    // ✅ VALIDATION SPÉCIFIQUE FRANCE - ENTREPRISE (Réforme 2026)
+    if (isFrenchCompany) {
+      if (!form.siren || !/^\d{9}$/.test(form.siren)) {
+        toast.error('SIREN obligatoire', { description: 'Pour une entreprise en France, le SIREN (9 chiffres) est requis pour l\'e-facturation B2B.' });
+        return;
+      }
+      if (!form.siret || !/^\d{14}$/.test(form.siret)) {
+        toast.error('SIRET obligatoire', { description: 'Pour une entreprise en France, le SIRET (14 chiffres) est requis pour identifier l\'établissement.' });
+        return;
+      }
+    }
+
     if (!currentTeamId) return;
     if (!editingId && !duplicateFound) {
       const existing = await checkDuplicate();
@@ -263,7 +295,16 @@ export default function Clients() {
     }
     setSaving(true);
     try {
-      const data: any = { ...form, teamId: currentTeamId, userId: user.$id };
+      const data: any = { 
+        ...form, 
+        teamId: currentTeamId, 
+        userId: user.$id,
+        // ✅ Nettoyer les champs si non pertinents
+        siren: isFrenchCompany ? form.siren : '',
+        siret: isFrenchCompany ? form.siret : '',
+        vatNumber: form.type === 'entreprise' ? form.vatNumber : '',
+      };
+      
       if (!editingId) {
         data.clientId = await getNextClientNumber();
       } else {
@@ -276,7 +317,7 @@ export default function Clients() {
       }
       if (editingId) {
         await databases.updateDocument(DATABASE_ID, 'clients', editingId, data);
-        toast.success('Client mis à jour', { description: `${form.firstName} ${form.lastName}`.trim() });
+        toast.success('Client mis à jour', { description: `${form.firstName} ${form.lastName}`.trim() || form.companyName });
       } else {
         let perms: string[] = [];
         if (user?.secureTeamId) {
@@ -340,7 +381,6 @@ export default function Clients() {
     return matchSearch && matchType && matchStatus && matchView;
   });
 
-  // Calculs de pagination
   const totalPages = Math.ceil(filtered.length / itemsPerPage);
   const startIndex = (currentPage - 1) * itemsPerPage;
   const endIndex = startIndex + itemsPerPage;
@@ -705,43 +745,89 @@ export default function Clients() {
               </div>
             )}
 
+            {/* ✅ Type de client + Pays */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <FormField label="Type">
-                <Select value={form.type} onChange={(e) => setForm({ ...form, type: e.target.value })}>
-                  <option value="particulier">Particulier</option>
-                  <option value="entreprise">Entreprise</option>
+              <FormField label="Type de client" required>
+                <Select 
+                  value={form.type} 
+                  onChange={(e) => {
+                    const newType = e.target.value;
+                    setForm({ 
+                      ...form, 
+                      type: newType,
+                      // Reset des champs entreprise si on passe en particulier
+                      siren: newType === 'particulier' ? '' : form.siren,
+                      siret: newType === 'particulier' ? '' : form.siret,
+                      vatNumber: newType === 'particulier' ? '' : form.vatNumber,
+                      companyName: newType === 'particulier' ? '' : form.companyName
+                    });
+                  }}
+                >
+                  <option value="particulier">👤 Particulier (B2C)</option>
+                  <option value="entreprise">🏢 Professionnel (B2B)</option>
                 </Select>
               </FormField>
-              <FormField label="Statut">
-                <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
-                  {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (
-                    <option key={key} value={key}>{label}</option>
-                  ))}
-                </Select>
+              <FormField label="Pays" required>
+                <div className="relative">
+                  <Globe size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <Select 
+                    value={form.country} 
+                    onChange={(e) => setForm({ ...form, country: e.target.value })}
+                    className="pl-9"
+                  >
+                    <option value="FR">🇫🇷 France</option>
+                    <option value="BE">🇧🇪 Belgique</option>
+                    <option value="CH">🇨🇭 Suisse</option>
+                    <option value="LU">🇱🇺 Luxembourg</option>
+                    <option value="DE">🇩🇪 Allemagne</option>
+                    <option value="ES">🇪🇸 Espagne</option>
+                    <option value="IT">🇮🇹 Italie</option>
+                    <option value="GB">🇬🇧 Royaume-Uni</option>
+                    <option value="US">🇺🇸 États-Unis</option>
+                    <option value="CA">🇨🇦 Canada</option>
+                    <option value="OTHER">🌍 Autre</option>
+                  </Select>
+                </div>
               </FormField>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <FormField label="Prénom">
-                <Input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Jean" />
-              </FormField>
-              <FormField label="Nom">
-                <Input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Dupont" />
-              </FormField>
-            </div>
+            {/* ✅ Alerte informative pour entreprises françaises */}
+            {isFrenchCompany && (
+              <Alert tone="info" icon={Shield} title="Conformité Réforme 2026">
+                <p className="text-sm">
+                  Pour un <strong>client professionnel établi en France</strong>, les identifiants <strong>SIREN</strong> et <strong>SIRET</strong> 
+                  sont obligatoires pour la transmission électronique (e-invoicing B2B via PDP/PPF).
+                </p>
+              </Alert>
+            )}
 
-            <FormField label="Entreprise" hint="Laisser vide si particulier">
-              <div className="relative">
-                <Building size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <Input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="pl-9" placeholder="Dupont Plomberie" />
+            {/* ✅ Informations Particulier */}
+            {form.type === 'particulier' && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                <FormField label="Prénom" required>
+                  <Input type="text" value={form.firstName} onChange={(e) => setForm({ ...form, firstName: e.target.value })} placeholder="Jean" />
+                </FormField>
+                <FormField label="Nom" required>
+                  <Input type="text" value={form.lastName} onChange={(e) => setForm({ ...form, lastName: e.target.value })} placeholder="Dupont" />
+                </FormField>
               </div>
-            </FormField>
+            )}
+
+            {/* ✅ Informations Entreprise */}
+            {form.type === 'entreprise' && (
+              <FormField label="Raison sociale" required>
+                <div className="relative">
+                  <Building size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <Input type="text" value={form.companyName} onChange={(e) => setForm({ ...form, companyName: e.target.value })} className="pl-9" placeholder="Dupont Plomberie SARL" />
+                </div>
+              </FormField>
+            )}
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
               <FormField label="Email">
                 <div className="relative">
                   <Mail size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="pl-9" placeholder="jean@dupont.fr" />
+                  <Input type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} className="pl-9" placeholder="contact@exemple.fr" />
                 </div>
               </FormField>
               <FormField label="Téléphone">
@@ -752,22 +838,88 @@ export default function Clients() {
               </FormField>
             </div>
 
-            <FormField label="Adresse">
-              <Input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} placeholder="123 rue de la Paix, 75000 Paris" />
+            <FormField label="Adresse" required>
+              <div className="relative">
+                <MapPin size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <Input type="text" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} className="pl-9" placeholder="123 rue de la Paix, 75000 Paris" />
+              </div>
             </FormField>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
-              <FormField label="Adresse de facturation">
-                <Input type="text" value={form.billingAddress} onChange={(e) => setForm({ ...form, billingAddress: e.target.value })} placeholder="Adresse de facturation" />
+            <FormField label="Adresse de facturation" hint="Si différente de l'adresse principale">
+              <Input type="text" value={form.billingAddress} onChange={(e) => setForm({ ...form, billingAddress: e.target.value })} placeholder="Adresse de facturation" />
+            </FormField>
+
+            {/* ✅ SECTION IDENTIFICATION FISCALE (Entreprise FR uniquement) */}
+            {isFrenchCompany && (
+              <div className="bg-purple-50 dark:bg-purple-900/20 border border-purple-200 dark:border-purple-800 rounded-xl p-5 space-y-4">
+                <h3 className="text-xs font-bold text-purple-900 dark:text-purple-200 uppercase tracking-wider flex items-center gap-2">
+                  <Shield size={14} className="text-purple-600 dark:text-purple-400" />
+                  Identification fiscale (Obligatoire - Réforme 2026)
+                </h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <FormField label="SIREN (9 chiffres)" required hint="Identifie l'entreprise">
+                    <Input 
+                      type="text" 
+                      value={form.siren} 
+                      onChange={(e) => setForm({ ...form, siren: e.target.value.replace(/\D/g, '').slice(0, 9) })} 
+                      placeholder="123456789" 
+                      maxLength={9}
+                      className="font-mono"
+                    />
+                  </FormField>
+                  <FormField label="SIRET (14 chiffres)" required hint="Identifie l'établissement">
+                    <Input 
+                      type="text" 
+                      value={form.siret} 
+                      onChange={(e) => setForm({ ...form, siret: e.target.value.replace(/\D/g, '').slice(0, 14) })} 
+                      placeholder="12345678901234" 
+                      maxLength={14}
+                      className="font-mono"
+                    />
+                  </FormField>
+                  <FormField label="N° TVA intracommunautaire" className="sm:col-span-2" hint="Format: FR + clé + 9 chiffres">
+                    <Input 
+                      type="text" 
+                      value={form.vatNumber} 
+                      onChange={(e) => setForm({ ...form, vatNumber: e.target.value.toUpperCase() })} 
+                      placeholder="FR12345678901" 
+                      className="font-mono"
+                    />
+                  </FormField>
+                </div>
+                <p className="text-[11px] text-slate-600 dark:text-slate-400">
+                  💡 Le <strong>SIREN</strong> (9 chiffres) identifie l'entreprise. Le <strong>SIRET</strong> (14 chiffres) identifie un établissement précis. 
+                  Ces données seront transmises via la plateforme agréée (PDP/PPF).
+                </p>
+              </div>
+            )}
+
+            {/* ✅ TVA pour entreprises hors France */}
+            {form.type === 'entreprise' && form.country !== 'FR' && (
+              <FormField label="N° TVA / Identification fiscale" hint="Selon le pays">
+                <Input 
+                  type="text" 
+                  value={form.vatNumber} 
+                  onChange={(e) => setForm({ ...form, vatNumber: e.target.value.toUpperCase() })} 
+                  placeholder="Ex: BE0123456789, CHE-123.456.789..." 
+                  className="font-mono"
+                />
               </FormField>
-              <FormField label="Numéro fiscal / TVA">
-                <Input type="text" value={form.taxNumber} onChange={(e) => setForm({ ...form, taxNumber: e.target.value })} placeholder="FR12345678901" />
-              </FormField>
-            </div>
+            )}
 
             <FormField label="Notes">
               <Textarea value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={3} placeholder="Notes internes..." />
             </FormField>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              <FormField label="Statut">
+                <Select value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })}>
+                  {Object.entries(statusLabels).filter(([k]) => k !== 'archived').map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </Select>
+              </FormField>
+            </div>
           </div>
         </Modal>
 

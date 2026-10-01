@@ -7,11 +7,8 @@ import { getFilePreviewUrl } from '../utils/storage';
 import { toast } from 'sonner';
 import Sidebar from '../components/Sidebar';
 import Modal from '../components/ui/Modal';
-import ActionMenu, { ActionMenuItem } from '../components/ui/ActionMenu';
 import {
   PageHeader,
-  TypeTabs,
-  EmptyState,
   ConfirmDialog,
   FormField,
   Input,
@@ -20,11 +17,11 @@ import {
   Card,
   SectionTitle,
   Badge,
-  type Entity,
 } from '../components/ui/SharedUI';
 import {
   Building2, Save, AlertCircle, CheckCircle2, Upload, Image as ImageIcon,
-  X, Copy, Lock, Plus, Trash2, Globe, Coins, FileText, Eye, Edit2, Target
+  X, Copy, Lock, Plus, Trash2, Globe, Coins, FileText, Eye, Edit2, Target,
+  Shield, Server, Zap
 } from 'lucide-react';
 import { ID, Query, Permission, Role } from 'appwrite';
 
@@ -80,12 +77,12 @@ export const formatMoney = (amount: number, currencyCode: string = 'EUR'): strin
 };
 
 // ============================================================
-// ✅ VALIDATION SIREN/SIRET
+// ✅ VALIDATION SIRET (14 chiffres)
 // ============================================================
 
-export const isValidSirenSiret = (value: string): boolean => {
+export const isValidSiret = (value: string): boolean => {
   const cleanValue = value.replace(/\s/g, '');
-  if (!/^\d{9}$|^\d{14}$/.test(cleanValue)) return false;
+  if (!/^\d{14}$/.test(cleanValue)) return false;
   let sum = 0;
   let isEven = false;
   for (let i = cleanValue.length - 1; i >= 0; i--) {
@@ -100,11 +97,17 @@ export const isValidSirenSiret = (value: string): boolean => {
   return sum % 10 === 0;
 };
 
-export const formatSirenSiret = (value: string): string => {
+export const formatSiret = (value: string): string => {
   const clean = value.replace(/\D/g, '');
-  if (clean.length === 9) return clean.replace(/(\d{3})(\d{3})(\d{3})/, '$1 $2 $3');
   if (clean.length === 14) return clean.replace(/(\d{3})(\d{3})(\d{3})(\d{5})/, '$1 $2 $3 $4');
   return clean;
+};
+
+// ✅ VALIDATION TVA FRANÇAISE
+export const isValidFrenchVAT = (vat: string): boolean => {
+  if (!vat) return false;
+  const clean = vat.replace(/\s/g, '').toUpperCase();
+  return /^FR[0-9A-Z]{2}\d{9}$/.test(clean);
 };
 
 const isValidEmail = (email: string): boolean => {
@@ -145,23 +148,48 @@ const DEFAULT_TVA_RATES: TvaRate[] = [
 ];
 
 // ============================================================
+// ⚡ E-FACTURATION - CONFIG
+// ============================================================
+
+interface EInvoiceSettings {
+  platform: 'ppf' | 'pdp' | 'od';
+  platformName: string;
+  platformEndpoint: string;
+  platformApiKey: string;
+  transmissionFormat: 'factur-x' | 'ubl' | 'cii';
+  autoTransmission: boolean;
+  requireElectronicForB2B: boolean;
+}
+
+const DEFAULT_E_INVOICE: EInvoiceSettings = {
+  platform: 'ppf',
+  platformName: '',
+  platformEndpoint: '',
+  platformApiKey: '',
+  transmissionFormat: 'factur-x',
+  autoTransmission: false,
+  requireElectronicForB2B: true,
+};
+
+// ============================================================
 // TYPES D'ONGLETS
 // ============================================================
 
-type TabId = 'company' | 'vat' | 'currency';
+type TabId = 'company' | 'vat' | 'currency' | 'einvoice';
 
 interface Tab {
   id: TabId;
   label: string;
   icon: React.ReactNode;
   description: string;
-  count?: number;
+  badge?: string;
 }
 
 const TABS: Tab[] = [
-  { id: 'company', label: 'Entreprise', icon: <Building2 size={18} />, description: 'Identité, logo et coordonnées' },
+  { id: 'company', label: 'Entreprise', icon: <Building2 size={18} />, description: 'Identité, logo et coordonnées (pré-remplit devis/factures)' },
   { id: 'vat', label: 'TVA', icon: <FileText size={18} />, description: 'Taux par pays' },
   { id: 'currency', label: 'Devise', icon: <Coins size={18} />, description: 'Monnaie utilisée' },
+  { id: 'einvoice', label: 'E-Facturation 2026', icon: <Zap size={18} />, description: 'Facturation électronique B2B', badge: '2026' },
 ];
 
 // ============================================================
@@ -184,12 +212,18 @@ export default function CompanySettings() {
   const [activeTab, setActiveTab] = useState<TabId>('company');
   const [isCheckingSiret, setIsCheckingSiret] = useState(false);
   const [siretError, setSiretError] = useState('');
+  
   const [formData, setFormData] = useState({
     name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '',
     tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '',
     defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
     monthlyGoal: 5000
   });
+  
+  // ✅ Paramètres e-facturation (collection einvoice_settings)
+  const [eInvoiceSettings, setEInvoiceSettings] = useState<EInvoiceSettings>(DEFAULT_E_INVOICE);
+  const [eInvoiceSettingsId, setEInvoiceSettingsId] = useState<string | null>(null);
+  
   const [customTvaRates, setCustomTvaRates] = useState<TvaRate[]>(DEFAULT_TVA_RATES);
   const [showAddTvaModal, setShowAddTvaModal] = useState(false);
   const [editingTvaId, setEditingTvaId] = useState<string | null>(null);
@@ -198,6 +232,12 @@ export default function CompanySettings() {
   const [confirmDeleteTva, setConfirmDeleteTva] = useState<TvaRate | null>(null);
 
   const defaultRateValid = customTvaRates.some(r => r.rate.toString() === formData.defaultTvaRate);
+
+  // ✅ Indicateurs pour la section e-facturation
+  const hasValidSiret = formData.siret && formData.siret.replace(/\s/g, '').length === 14 && isValidSiret(formData.siret.replace(/\s/g, ''));
+  const siren = formData.siret.replace(/\s/g, '').substring(0, 9);
+  const nic = formData.siret.replace(/\s/g, '').substring(9, 14);
+  const isTvaApplicable = !formData.tvaNumber.includes('non applicable');
 
   useEffect(() => {
     if (!permLoading && !hasPermission('settings.view')) {
@@ -209,6 +249,10 @@ export default function CompanySettings() {
     if (!user) { navigate('/login'); return; }
     loadSettings();
   }, [user]);
+
+  // ============================================================
+  // 📥 CHARGEMENT
+  // ============================================================
 
   const loadSettings = async () => {
     try {
@@ -223,6 +267,7 @@ export default function CompanySettings() {
       if (!teamId) { setLoading(false); return; }
       setCurrentTeamId(teamId);
 
+      // 1. Charger company_settings
       let response = await databases.listDocuments(DATABASE_ID, 'company_settings', [Query.equal('teamId', teamId)]);
       if (response.documents.length === 0) {
         response = await databases.listDocuments(DATABASE_ID, 'company_settings', [Query.equal('userId', user.$id)]);
@@ -232,14 +277,7 @@ export default function CompanySettings() {
       if (myDoc) {
         if (myDoc.teamId && myDoc.teamId !== teamId) {
           setExistingDocId(null);
-          setFormData({ 
-            name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', 
-            tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', 
-            defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
-            monthlyGoal: 5000
-          });
-          setLogoPreview('');
-          setCustomTvaRates(DEFAULT_TVA_RATES);
+          resetForm();
         } else {
           setExistingDocId(myDoc.$id);
           setFormData({
@@ -265,20 +303,57 @@ export default function CompanySettings() {
         }
       } else {
         setExistingDocId(null);
-        setFormData({ 
-          name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', 
-          tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', 
-          defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
-          monthlyGoal: 5000
-        });
-        setLogoPreview('');
-        setCustomTvaRates(DEFAULT_TVA_RATES);
+        resetForm();
+      }
+
+      // 2. ✅ Charger les paramètres e-facturation depuis einvoice_settings
+      try {
+        const eInvoiceRes = await databases.listDocuments(
+          DATABASE_ID, 
+          'einvoice_settings', 
+          [Query.equal('teamId', teamId), Query.limit(1)]
+        );
+        
+        if (eInvoiceRes.documents.length > 0) {
+          const doc = eInvoiceRes.documents[0] as any;
+          setEInvoiceSettingsId(doc.$id);
+          setEInvoiceSettings({
+            platform: doc.platform || 'ppf',
+            platformName: doc.platformName || '',
+            platformEndpoint: doc.platformEndpoint || '',
+            platformApiKey: doc.platformApiKey || '',
+            transmissionFormat: doc.transmissionFormat || 'factur-x',
+            autoTransmission: doc.autoTransmission === true,
+            requireElectronicForB2B: doc.requireElectronicForB2B !== false,
+          });
+        } else {
+          setEInvoiceSettingsId(null);
+          setEInvoiceSettings(DEFAULT_E_INVOICE);
+        }
+      } catch (e) {
+        console.warn('Paramètres e-facturation non chargés:', e);
+        setEInvoiceSettings(DEFAULT_E_INVOICE);
       }
     } catch (err) { console.error('Erreur chargement:', err); } finally { setLoading(false); }
   };
 
+  const resetForm = () => {
+    setFormData({ 
+      name: '', legalForm: 'Entreprise Individuelle', address: '', siret: '', rcs: '', 
+      tvaNumber: 'TVA non applicable, art. 293 B du CGI', phone: '', email: '', 
+      defaultTvaRate: '20', logoFileId: '', publicSlug: '', currency: 'EUR',
+      monthlyGoal: 5000
+    });
+    setLogoPreview('');
+    setCustomTvaRates(DEFAULT_TVA_RATES);
+  };
+
+  // ============================================================
+  // 🔧 HANDLERS SIRET
+  // ============================================================
+
   const handleSiretChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const formatted = formatSirenSiret(e.target.value);
+    const formatted = formatSiret(e.target.value);
     setFormData(prev => ({ ...prev, siret: formatted }));
     setSiretError('');
   };
@@ -286,8 +361,8 @@ export default function CompanySettings() {
   const handleSiretBlur = async () => {
     const cleanSiret = formData.siret.replace(/\s/g, '');
     if (cleanSiret.length === 0) return;
-    if (!isValidSirenSiret(cleanSiret)) {
-      setSiretError('Le numéro SIREN/SIRET est mathématiquement invalide. Vérifiez les chiffres.');
+    if (!isValidSiret(cleanSiret)) {
+      setSiretError('Le numéro SIRET est invalide. Il doit contenir exactement 14 chiffres.');
       return;
     }
     setIsCheckingSiret(true);
@@ -324,6 +399,10 @@ export default function CompanySettings() {
     }
   };
 
+  // ============================================================
+  // 🖼️ LOGO
+  // ============================================================
+
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -343,6 +422,10 @@ export default function CompanySettings() {
   const handleRemoveLogo = async () => {
     try { if (formData.logoFileId) await storage.deleteFile('company_logos', formData.logoFileId); setFormData(p => ({...p, logoFileId: ''})); setLogoPreview(''); } catch(e){}
   };
+
+  // ============================================================
+  // 💰 TVA
+  // ============================================================
 
   const openAddTvaModal = (tva?: TvaRate) => {
     if (tva) {
@@ -383,12 +466,16 @@ export default function CompanySettings() {
     toast.success('Taux supprimé !', { description: "N'oubliez pas d'enregistrer." });
   };
 
+  // ============================================================
+  // 💾 SAUVEGARDE
+  // ============================================================
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user?.$id || !currentTeamId) { toast.error('Erreur de session ou d\'équipe.'); return; }
 
-    if (formData.siret && !isValidSirenSiret(formData.siret)) {
-      toast.error('Le numéro SIREN/SIRET est invalide.');
+    if (formData.siret && !isValidSiret(formData.siret.replace(/\s/g, ''))) {
+      toast.error('Le numéro SIRET est invalide (14 chiffres attendus).');
       setActiveTab('company');
       return;
     }
@@ -402,24 +489,77 @@ export default function CompanySettings() {
       setActiveTab('vat');
       return;
     }
+    
+    // ✅ Validation e-facturation
+    if (activeTab === 'einvoice') {
+      if (!hasValidSiret) {
+        toast.error('Un SIRET valide (14 chiffres) est obligatoire pour activer l\'e-facturation.');
+        setActiveTab('company');
+        return;
+      }
+      if (eInvoiceSettings.platform !== 'ppf' && !eInvoiceSettings.platformName.trim()) {
+        toast.error('Veuillez indiquer le nom de la plateforme PDP/OD.');
+        return;
+      }
+    }
 
     setSaving(true); setError(''); setSuccess('');
     try {
-      const payload = { ...formData, userId: user.$id, teamId: currentTeamId, tvaRates: JSON.stringify(customTvaRates) };
-      let perms: string[] = [];
-      if (user?.secureTeamId) {
-        perms = [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))];
-      } else {
-        perms = [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
-      }
+      const perms: string[] = user?.secureTeamId
+        ? [Permission.read(Role.team(user.secureTeamId)), Permission.update(Role.team(user.secureTeamId)), Permission.delete(Role.team(user.secureTeamId))]
+        : [Permission.read(Role.users()), Permission.update(Role.users()), Permission.delete(Role.users())];
+
+      // 1. Sauvegarder company_settings
+      const companyPayload = { 
+        ...formData, 
+        userId: user.$id, 
+        teamId: currentTeamId, 
+        tvaRates: JSON.stringify(customTvaRates),
+      };
+      
       if (existingDocId) {
         const existingDoc = await databases.getDocument(DATABASE_ID, 'company_settings', existingDocId);
         if (existingDoc.teamId && existingDoc.teamId !== currentTeamId) throw new Error('Accès refusé');
-        await databases.updateDocument(DATABASE_ID, 'company_settings', existingDocId, payload);
+        await databases.updateDocument(DATABASE_ID, 'company_settings', existingDocId, companyPayload);
       } else {
-        await databases.createDocument(DATABASE_ID, 'company_settings', ID.unique(), payload, perms);
+        await databases.createDocument(DATABASE_ID, 'company_settings', ID.unique(), companyPayload, perms);
       }
-      toast.success('Paramètres enregistrés avec succès !');
+
+      // 2. ✅ Sauvegarder les paramètres e-facturation dans einvoice_settings
+      const eInvoicePayload = {
+        teamId: currentTeamId,
+        userId: user.$id,
+        platform: eInvoiceSettings.platform,
+        platformName: eInvoiceSettings.platformName,
+        platformEndpoint: eInvoiceSettings.platformEndpoint,
+        platformApiKey: eInvoiceSettings.platformApiKey,
+        transmissionFormat: eInvoiceSettings.transmissionFormat,
+        autoTransmission: eInvoiceSettings.autoTransmission,
+        requireElectronicForB2B: eInvoiceSettings.requireElectronicForB2B,
+      };
+
+      try {
+        if (eInvoiceSettingsId) {
+          await databases.updateDocument(DATABASE_ID, 'einvoice_settings', eInvoiceSettingsId, eInvoicePayload);
+        } else {
+          const newDoc = await databases.createDocument(
+            DATABASE_ID,
+            'einvoice_settings',
+            ID.unique(),
+            eInvoicePayload,
+            perms
+          );
+          setEInvoiceSettingsId(newDoc.$id);
+        }
+      } catch (eInvoiceError: any) {
+        console.error('Erreur sauvegarde e-facturation:', eInvoiceError);
+        toast.warning('Paramètres entreprise enregistrés, mais les paramètres e-facturation ont échoué.');
+      }
+
+      toast.success('Paramètres enregistrés avec succès !', {
+        description: 'Ces informations seront utilisées pour pré-remplir vos devis et factures.'
+      });
+      await loadSettings();
     } catch (err: any) { toast.error(`Erreur: ${err.message}`); } finally { setSaving(false); }
   };
 
@@ -428,6 +568,10 @@ export default function CompanySettings() {
     const value = target.type === 'number' ? parseFloat(target.value) || 0 : target.value;
     setFormData({ ...formData, [target.name]: value });
   };
+
+  // ============================================================
+  // 🎨 RENDU
+  // ============================================================
 
   if (permLoading) return (
     <Sidebar>
@@ -499,6 +643,11 @@ export default function CompanySettings() {
                   >
                     {tab.icon}
                     <span className="hidden sm:inline">{tab.label}</span>
+                    {tab.badge && (
+                      <span className="px-1.5 py-0.5 text-[9px] font-bold bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded">
+                        {tab.badge}
+                      </span>
+                    )}
                     {isActive && (
                       <span className="absolute bottom-0 left-0 right-0 h-0.5 bg-purple-600 dark:bg-purple-400"></span>
                     )}
@@ -575,6 +724,9 @@ export default function CompanySettings() {
                 {/* INFOS GÉNÉRALES */}
                 <Card>
                   <SectionTitle icon={Building2}>Informations légales</SectionTitle>
+                  <Alert tone="info" icon={AlertCircle} className="mb-4">
+                    💡 <strong>Important :</strong> Ces informations sont automatiquement pré-remplies dans vos <strong>devis</strong> et <strong>factures</strong>.
+                  </Alert>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <FormField label="Nom de l'entreprise" required>
                       <Input type="text" name="name" required value={formData.name} onChange={handleChange} disabled={!canEdit} />
@@ -585,9 +737,9 @@ export default function CompanySettings() {
                       </Select>
                     </FormField>
                     <FormField label="Adresse complète" className="md:col-span-2">
-                      <Input type="text" name="address" value={formData.address} onChange={handleChange} disabled={!canEdit} />
+                      <Input type="text" name="address" value={formData.address} onChange={handleChange} disabled={!canEdit} placeholder="123 rue de la Paix, 75000 Paris" />
                     </FormField>
-                    <FormField label="N° SIREN / SIRET" hint={siretError || "💡 Le formatage et la vérification officielle se font automatiquement."}>
+                    <FormField label="N° SIRET" hint={siretError || "💡 14 chiffres : 9 pour le SIREN + 5 pour le NIC. Obligatoire pour l'e-facturation B2B en France."}>
                       <div className="relative">
                         <Input
                           type="text"
@@ -606,9 +758,19 @@ export default function CompanySettings() {
                           </div>
                         )}
                       </div>
+                      {hasValidSiret && (
+                        <div className="flex flex-wrap gap-2 mt-2">
+                          <span className="inline-flex items-center gap-1.5 text-xs font-mono bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 px-2 py-1 rounded">
+                            <span className="font-semibold">SIREN:</span> {siren}
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-xs font-mono bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300 px-2 py-1 rounded">
+                            <span className="font-semibold">NIC:</span> {nic}
+                          </span>
+                        </div>
+                      )}
                     </FormField>
                     <FormField label="RCS / RM">
-                      <Input type="text" name="rcs" value={formData.rcs} onChange={handleChange} disabled={!canEdit} />
+                      <Input type="text" name="rcs" value={formData.rcs} onChange={handleChange} disabled={!canEdit} placeholder="Ex: RCS Paris B 123 456 789" />
                     </FormField>
                     <FormField label="N° TVA intracommunautaire" className="md:col-span-2">
                       <Select name="tvaNumber" value={formData.tvaNumber.startsWith('TVA non') ? formData.tvaNumber : 'Assujetti à la TVA'} onChange={(e) => {
@@ -622,7 +784,14 @@ export default function CompanySettings() {
                         <option value="Assujetti à la TVA">Assujetti à la TVA (saisir le numéro ci-dessous)</option>
                       </Select>
                       {formData.tvaNumber !== 'TVA non applicable, art. 293 B du CGI' && (
-                        <Input type="text" placeholder="Ex: FR12345678901" value={formData.tvaNumber === 'Assujetti à la TVA' ? '' : formData.tvaNumber} onChange={(e) => setFormData({ ...formData, tvaNumber: (e.target as HTMLInputElement).value || 'Assujetti à la TVA' })} disabled={!canEdit} className="mt-2" />
+                        <Input 
+                          type="text" 
+                          placeholder="Ex: FR12345678901" 
+                          value={formData.tvaNumber === 'Assujetti à la TVA' ? '' : formData.tvaNumber} 
+                          onChange={(e) => setFormData({ ...formData, tvaNumber: (e.target as HTMLInputElement).value || 'Assujetti à la TVA' })} 
+                          disabled={!canEdit} 
+                          className="mt-2" 
+                        />
                       )}
                     </FormField>
                   </div>
@@ -633,10 +802,10 @@ export default function CompanySettings() {
                   <SectionTitle icon={Globe}>Coordonnées</SectionTitle>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6">
                     <FormField label="Téléphone">
-                      <Input type="tel" name="phone" value={formData.phone} onChange={handleChange} disabled={!canEdit} />
+                      <Input type="tel" name="phone" value={formData.phone} onChange={handleChange} disabled={!canEdit} placeholder="01 23 45 67 89" />
                     </FormField>
                     <FormField label="Email">
-                      <Input type="email" name="email" value={formData.email} onChange={handleChange} disabled={!canEdit} />
+                      <Input type="email" name="email" value={formData.email} onChange={handleChange} disabled={!canEdit} placeholder="contact@entreprise.fr" />
                     </FormField>
                   </div>
                 </Card>
@@ -767,7 +936,6 @@ export default function CompanySettings() {
                   </FormField>
                 </Card>
 
-                {/* APERÇU */}
                 <Card>
                   <SectionTitle icon={Eye}>Aperçu du rendu</SectionTitle>
                   <Alert tone="info" icon={Eye} className="mb-4">
@@ -786,7 +954,6 @@ export default function CompanySettings() {
                   </div>
                 </Card>
 
-                {/* AUTRES DEVISES */}
                 <Card>
                   <SectionTitle>Autres devises disponibles</SectionTitle>
                   <div className="flex flex-wrap gap-2">
@@ -808,6 +975,242 @@ export default function CompanySettings() {
                 <Alert tone="info" icon={AlertCircle} title="Changement de devise">
                   Si vous changez de devise, les anciens documents ne seront pas modifiés. Seuls les nouveaux documents utiliseront la devise sélectionnée. La devise est stockée dans chaque document pour traçabilité.
                 </Alert>
+              </div>
+            )}
+
+            {/* ONGLET 4 : E-FACTURATION 2026 */}
+            {activeTab === 'einvoice' && (
+              <div className="space-y-6 animate-fadeIn">
+                <Alert tone="info" icon={AlertCircle} title="Réforme 2026 - Facturation électronique obligatoire">
+                  <p className="text-sm mt-1">
+                    À partir du <strong>1er septembre 2026</strong>, toutes les entreprises françaises assujetties à la TVA 
+                    devront émettre et recevoir leurs factures B2B sous format électronique via une plateforme agréée (PDP) 
+                    ou le portail public (PPF/Chorus Pro).
+                  </p>
+                </Alert>
+
+                {!hasValidSiret ? (
+                  <Alert tone="warning" icon={Shield} title="⚠️ SIRET requis pour l'e-facturation">
+                    <p className="text-sm mt-1">
+                      Pour activer l'e-facturation, vous devez d'abord renseigner un <strong>SIRET valide (14 chiffres)</strong> 
+                      dans l'onglet "Entreprise". Le SIREN (9 chiffres) et le NIC (5 chiffres) seront extraits automatiquement.
+                    </p>
+                    <button 
+                      type="button" 
+                      onClick={() => setActiveTab('company')}
+                      className="mt-3 text-sm font-medium text-purple-600 dark:text-purple-400 hover:underline flex items-center gap-1"
+                    >
+                      → Aller à l'onglet Entreprise
+                    </button>
+                  </Alert>
+                ) : (
+                  <Alert tone="success" icon={CheckCircle2} title="✅ Données prêtes pour l'e-facturation">
+                    <p className="text-sm mt-1">
+                      Votre SIRET <strong className="font-mono">{formData.siret}</strong> est valide.
+                      {isTvaApplicable && formData.tvaNumber && !formData.tvaNumber.includes('Assujetti') && (
+                        <> TVA : <strong className="font-mono">{formData.tvaNumber}</strong></>
+                      )}
+                      {' '}Votre entreprise est prête pour transmettre des factures électroniques B2B.
+                    </p>
+                  </Alert>
+                )}
+
+                <Card>
+                  <SectionTitle icon={Server}>Plateforme de transmission</SectionTitle>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 mb-4">
+                    Choisissez la plateforme par laquelle vous transmettrez vos e-factures.
+                  </p>
+                  <div className="space-y-4">
+                    <FormField label="Type de plateforme" required>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <button
+                          type="button"
+                          onClick={() => setEInvoiceSettings({ ...eInvoiceSettings, platform: 'ppf' })}
+                          disabled={!canEdit}
+                          className={`p-4 rounded-xl border-2 text-left transition-all ${
+                            eInvoiceSettings.platform === 'ppf'
+                              ? 'border-purple-600 bg-purple-50 dark:bg-purple-900/20'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">🏛️</span>
+                            <span className="font-semibold text-sm">PPF (Gratuit)</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">
+                            Portail Public (Chorus Pro) - Solution gratuite de l'État français
+                          </p>
+                        </button>
+                        
+                        <button
+                          type="button"
+                          onClick={() => setEInvoiceSettings({ ...eInvoiceSettings, platform: 'pdp' })}
+                          disabled={!canEdit}
+                          className={`p-4 rounded-xl border-2 text-left transition-all ${
+                            eInvoiceSettings.platform === 'pdp'
+                              ? 'border-purple-600 bg-purple-50 dark:bg-purple-900/20'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">🏢</span>
+                            <span className="font-semibold text-sm">PDP (Payant)</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">
+                            Plateforme de Dématérialisation Partenaire (ex: PennyLane, Yousign)
+                          </p>
+                        </button>
+                        
+                        <button
+                          type="button"
+                          onClick={() => setEInvoiceSettings({ ...eInvoiceSettings, platform: 'od' })}
+                          disabled={!canEdit}
+                          className={`p-4 rounded-xl border-2 text-left transition-all ${
+                            eInvoiceSettings.platform === 'od'
+                              ? 'border-purple-600 bg-purple-50 dark:bg-purple-900/20'
+                              : 'border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-lg">🔗</span>
+                            <span className="font-semibold text-sm">OD</span>
+                          </div>
+                          <p className="text-xs text-slate-600 dark:text-slate-400">
+                            Opérateur de Dématérialisation (solution tierce)
+                          </p>
+                        </button>
+                      </div>
+                    </FormField>
+
+                    {eInvoiceSettings.platform !== 'ppf' && (
+                      <>
+                        <FormField label="Nom de la plateforme" required>
+                          <Input 
+                            type="text" 
+                            value={eInvoiceSettings.platformName}
+                            onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, platformName: e.target.value })}
+                            disabled={!canEdit}
+                            placeholder="Ex: PennyLane, Yousign, Sage..."
+                          />
+                        </FormField>
+                        <FormField label="URL de l'API (Endpoint)">
+                          <Input 
+                            type="url" 
+                            value={eInvoiceSettings.platformEndpoint}
+                            onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, platformEndpoint: e.target.value })}
+                            disabled={!canEdit}
+                            placeholder="https://api.exemple.com/v1"
+                          />
+                        </FormField>
+                        <FormField label="Clé API / Token d'authentification">
+                          <Input 
+                            type="password" 
+                            value={eInvoiceSettings.platformApiKey}
+                            onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, platformApiKey: e.target.value })}
+                            disabled={!canEdit}
+                            placeholder="Votre clé API secrète"
+                          />
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                            🔒 Stockée de manière sécurisée. Ne jamais partager.
+                          </p>
+                        </FormField>
+                      </>
+                    )}
+                  </div>
+                </Card>
+
+                <Card>
+                  <SectionTitle icon={FileText}>Format et transmission</SectionTitle>
+                  <div className="space-y-4">
+                    <FormField label="Format de facturation électronique" required>
+                      <Select 
+                        value={eInvoiceSettings.transmissionFormat}
+                        onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, transmissionFormat: e.target.value as any })}
+                        disabled={!canEdit}
+                      >
+                        <option value="factur-x">Factur-X (CII) - Recommandé en France</option>
+                        <option value="ubl">UBL 2.1 - Standard européen</option>
+                        <option value="cii">CII UN/CEFACT - Format UN</option>
+                      </Select>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                        💡 <strong>Factur-X</strong> est le format hybride (PDF/A-3 + XML) recommandé pour la France.
+                      </p>
+                    </FormField>
+
+                    <div className="space-y-3">
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={eInvoiceSettings.autoTransmission}
+                          onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, autoTransmission: e.target.checked })}
+                          disabled={!canEdit}
+                          className="mt-1 rounded text-purple-600 focus:ring-purple-500"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium text-sm text-slate-900 dark:text-white">
+                            Transmission automatique
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Transmettre automatiquement les factures à la plateforme après validation
+                          </p>
+                        </div>
+                      </label>
+
+                      <label className="flex items-start gap-3 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={eInvoiceSettings.requireElectronicForB2B}
+                          onChange={(e) => setEInvoiceSettings({ ...eInvoiceSettings, requireElectronicForB2B: e.target.checked })}
+                          disabled={!canEdit}
+                          className="mt-1 rounded text-purple-600 focus:ring-purple-500"
+                        />
+                        <div className="flex-1">
+                          <div className="font-medium text-sm text-slate-900 dark:text-white">
+                            Exiger l'e-facturation pour les clients B2B français
+                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                            Afficher un avertissement si un client professionnel français n'a pas de SIRET
+                          </p>
+                        </div>
+                      </label>
+                    </div>
+                  </div>
+                </Card>
+
+                <Card>
+                  <SectionTitle icon={AlertCircle}>Conformité et obligations</SectionTitle>
+                  <div className="space-y-3 text-sm">
+                    <div className="flex items-start gap-3 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
+                      <CheckCircle2 size={18} className="text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-green-900 dark:text-green-100">Émission de factures</div>
+                        <p className="text-xs text-green-700 dark:text-green-300 mt-0.5">
+                          Toutes vos factures B2B doivent être émises sous format électronique à partir du 01/09/2026
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <AlertCircle size={18} className="text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-blue-900 dark:text-blue-100">Réception de factures</div>
+                        <p className="text-xs text-blue-700 dark:text-blue-300 mt-0.5">
+                          Vous devez être capable de recevoir des e-factures de vos fournisseurs via la plateforme choisie
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-3 p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                      <FileText size={18} className="text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5" />
+                      <div>
+                        <div className="font-medium text-purple-900 dark:text-purple-100">E-reporting (B2C et international)</div>
+                        <p className="text-xs text-purple-700 dark:text-purple-300 mt-0.5">
+                          Les transactions B2C et internationales doivent être déclarées via le e-reporting (données de transaction)
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </Card>
               </div>
             )}
 
